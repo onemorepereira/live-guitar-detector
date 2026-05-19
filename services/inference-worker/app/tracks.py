@@ -100,9 +100,9 @@ class TrackRegistry:
 
         Raises :class:`KeyError` if ``track_id`` has never been observed.
         """
+        a = self.age(track_id, frame_no)  # raises KeyError if unknown
         if bbox_area_fraction < MIN_BBOX_AREA_FRACTION:
             return False
-        a = self.age(track_id, frame_no)  # raises KeyError if unknown
         if a < WARMUP_FRAMES:
             return True
         interval = STABLE_CLASSIFY_INTERVAL if stable else UNSTABLE_CLASSIFY_INTERVAL

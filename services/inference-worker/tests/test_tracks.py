@@ -143,7 +143,7 @@ def test_prune_returns_empty_when_no_stale_tracks():
     assert reg.prune(current_frame_no=10) == []
 
 
-def test_should_classify_unknown_track_treats_as_new():
+def test_should_classify_unknown_track_raises():
     """should_classify() for a never-observed track raises KeyError.
 
     The caller contract is: always observe() before should_classify().
@@ -156,3 +156,37 @@ def test_should_classify_unknown_track_treats_as_new():
             stable=False,
             bbox_area_fraction=BIG_BBOX,
         )
+
+
+def test_should_classify_at_bbox_area_threshold_classifies():
+    """bbox_area_fraction exactly at the floor (0.005) is NOT skipped.
+
+    Pins the strict-less-than boundary: a future flip to `<=` would break this.
+    """
+    reg = TrackRegistry()
+    reg.observe(track_id=1, frame_no=0)
+    assert (
+        reg.should_classify(
+            track_id=1,
+            frame_no=0,
+            stable=False,
+            bbox_area_fraction=0.005,
+        )
+        is True
+    )
+
+
+def test_prune_at_exact_threshold_prunes():
+    """A gap of exactly PRUNE_AFTER_FRAMES (90) prunes the track."""
+    reg = TrackRegistry()
+    reg.observe(track_id=1, frame_no=0)
+    assert reg.prune(current_frame_no=90) == [1]
+
+
+def test_prune_one_below_threshold_keeps():
+    """A gap of PRUNE_AFTER_FRAMES - 1 (89) does NOT prune the track."""
+    reg = TrackRegistry()
+    reg.observe(track_id=1, frame_no=0)
+    assert reg.prune(current_frame_no=89) == []
+    # Track survives: age() still works.
+    assert reg.age(track_id=1, frame_no=89) == 89
