@@ -61,21 +61,34 @@ def _ensure_dir(p: Path) -> Path:
     return p
 
 
-def _write_precision_marker(out_dir: Path, precision: str, notes: str = "") -> None:
-    """Drop a small precision.json next to the IR for downstream consumers."""
-    info = {"precision": precision}
+def _write_precision_marker(out_dir: Path, precision: str, notes: str = "", **extra: str) -> None:
+    """Drop a small precision.json next to the IR for downstream consumers.
+
+    Arbitrary string-valued metadata can be appended via ``**extra`` (for
+    example ``model_name`` / ``pretrained`` for CLIP) so a future operator can
+    tell which weights a given IR came from without relying solely on the
+    directory name.
+    """
+    info: dict[str, str] = {"precision": precision}
     if notes:
         info["notes"] = notes
+    for key, value in extra.items():
+        if value:
+            info[key] = value
     (out_dir / "precision.json").write_text(json.dumps(info, indent=2) + "\n")
 
 
-def _has_openvino_ir(dir_path: Path) -> bool:
-    """Return True if dir_path contains an OpenVINO IR (.xml + .bin)."""
-    if not dir_path.exists():
-        return False
-    xmls = list(dir_path.rglob("*.xml"))
-    bins = list(dir_path.rglob("*.bin"))
-    return bool(xmls and bins)
+def _export_complete(target: Path) -> bool:
+    """Return True if `target` contains a completed export (precision marker present).
+
+    We use ``precision.json`` as the completion sentinel rather than the IR
+    files (``.xml``/``.bin``) because a crashed export can leave the IR files
+    partially written. The marker is the LAST file we write on success, so its
+    presence reliably indicates the export finished. If a stale dir has
+    ``.xml`` and ``.bin`` but no ``precision.json``, the next run will
+    re-export.
+    """
+    return (target / "precision.json").is_file()
 
 
 # ---------------------------------------------------------------------------
@@ -130,7 +143,7 @@ def cmd_export_yolo(in_path: Path, out: Path, int8: bool = False, force: bool = 
     suffix = "-int8" if int8 else "-fp32"
     final_dir = out / f"{YOLO_EXPORT_DIRNAME}{suffix}"
 
-    if _has_openvino_ir(final_dir) and not force:
+    if _export_complete(final_dir) and not force:
         logger.info(
             f"YOLO IR already present at {final_dir}; skipping export (use --force to re-export)"
         )
@@ -162,7 +175,7 @@ def cmd_export_yolo(in_path: Path, out: Path, int8: bool = False, force: bool = 
             precision = "fp32"
             suffix = "-fp32"
             final_dir = out / f"{YOLO_EXPORT_DIRNAME}{suffix}"
-            if _has_openvino_ir(final_dir) and not force:
+            if _export_complete(final_dir) and not force:
                 return final_dir
             exported = model.export(format="openvino", imgsz=416)
         else:
@@ -185,6 +198,7 @@ def cmd_export_yolo(in_path: Path, out: Path, int8: bool = False, force: bool = 
         final_dir,
         precision,
         notes="INT8 deferred — no OIv7-aligned calibration set" if not int8 else "",
+        model_name="yolov8n-oiv7",
     )
     logger.info(f"YOLO IR written to {final_dir} in {time.time() - t0:.1f}s")
     return final_dir
@@ -377,12 +391,23 @@ def cmd_export_clip(
     image_dir = out / f"{CLIP_IMAGE_DIRNAME}-{image_precision}"
     text_dir = out / f"{CLIP_TEXT_DIRNAME}-{text_precision}"
 
-    if _has_openvino_ir(image_dir) and _has_openvino_ir(text_dir) and not force:
+    if _export_complete(image_dir) and _export_complete(text_dir) and not force:
         logger.info(
             f"CLIP IRs already present at {image_dir} and {text_dir}; "
             "skipping export (use --force to re-export)"
         )
         return image_dir, text_dir
+
+    # Fail fast with an actionable message if the optional [export] extras
+    # aren't installed. Without onnxscript, torch.onnx.export blows up ~50
+    # lines deep with a much less obvious error.
+    try:
+        import onnxscript  # noqa: F401
+    except ImportError as exc:
+        raise RuntimeError(
+            "CLIP export requires the optional [export] extras. "
+            "Install with: pip install -e '.[export]'"
+        ) from exc
 
     if not in_path.exists():
         raise FileNotFoundError(f"CLIP weights not found: {in_path}")
@@ -412,10 +437,17 @@ def cmd_export_clip(
         image_dir,
         image_precision,
         notes="INT8 deferred — needs calibration dataset" if not image_int8 else "",
+        model_name=model_name,
+        pretrained=pretrained,
     )
 
     _export_clip_text_tower(model, text_dir, text_precision)
-    _write_precision_marker(text_dir, text_precision)
+    _write_precision_marker(
+        text_dir,
+        text_precision,
+        model_name=model_name,
+        pretrained=pretrained,
+    )
 
     logger.info(f"CLIP IRs written to {image_dir} and {text_dir} in {time.time() - t0:.1f}s")
     return image_dir, text_dir
@@ -439,6 +471,23 @@ def cmd_all(
     t0 = time.time()
     logger.info(f"Output root: {out.resolve()}")
 
+    # Track which sub-steps actually did work versus were short-circuited by
+    # the idempotency checks, so the final summary can make that explicit.
+    # Each check probes the same condition the corresponding cmd_* function
+    # uses to decide whether to skip.
+    yolo_pt_path = raw_dir / YOLO_WEIGHT
+    yolo_ir_dir = out / f"{YOLO_EXPORT_DIRNAME}{'-int8' if yolo_int8 else '-fp32'}"
+    clip_pt_path = raw_dir / CLIP_STATE_FILENAME
+    clip_image_dir = out / f"{CLIP_IMAGE_DIRNAME}-{'int8' if clip_image_int8 else 'fp16'}"
+    clip_text_dir = out / f"{CLIP_TEXT_DIRNAME}-fp16"
+
+    yolo_dl_skipped = yolo_pt_path.exists() and not force
+    yolo_ex_skipped = _export_complete(yolo_ir_dir) and not force
+    clip_dl_skipped = clip_pt_path.exists() and not force
+    clip_ex_skipped = (
+        _export_complete(clip_image_dir) and _export_complete(clip_text_dir) and not force
+    )
+
     yolo_pt = cmd_download_yolo(raw_dir, force=force)
     cmd_export_yolo(yolo_pt, out, int8=yolo_int8, force=force)
 
@@ -447,7 +496,16 @@ def cmd_all(
     )
     cmd_export_clip(clip_pt, out, image_int8=clip_image_int8, force=force)
 
-    logger.info(f"All done in {time.time() - t0:.1f}s total")
+    def _tag(skipped: bool) -> str:
+        return "skipped" if skipped else "ran"
+
+    steps = (
+        f"YOLO download ({_tag(yolo_dl_skipped)}), "
+        f"YOLO export ({_tag(yolo_ex_skipped)}), "
+        f"CLIP download ({_tag(clip_dl_skipped)}), "
+        f"CLIP export ({_tag(clip_ex_skipped)})"
+    )
+    logger.info(f"All done in {time.time() - t0:.1f}s. Steps: {steps}.")
 
 
 # ---------------------------------------------------------------------------

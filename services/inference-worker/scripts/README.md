@@ -77,8 +77,14 @@ app/models/
 ```
 
 `precision.json` records the actual precision the model was exported at,
-along with any caveats (e.g. "INT8 deferred"). Loaders should treat the
-`precision` field as authoritative rather than parsing directory names.
+along with any caveats (e.g. "INT8 deferred") and the source model identity
+(`model_name`, plus `pretrained` for the CLIP towers). Loaders should treat
+the `precision` field as authoritative rather than parsing directory names.
+
+The marker is also the **completion sentinel**: it is the last file written
+on each successful export, so an export dir without a `precision.json`
+(e.g. left behind by a crash or Ctrl-C in mid-flight) is treated as
+incomplete and re-exported on the next run.
 
 ### Resource cost (observed)
 
