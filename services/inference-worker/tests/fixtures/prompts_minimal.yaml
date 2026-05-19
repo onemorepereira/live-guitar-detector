@@ -1,0 +1,7 @@
+prompts:
+  - text: "a photograph of a thing"
+    brand: Foo
+    model: Bar
+  - text: "a photograph of another thing"
+    brand: Baz
+    model: Qux
