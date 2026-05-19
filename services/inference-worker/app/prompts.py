@@ -12,14 +12,19 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import Annotated
 
 import yaml
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, StringConstraints, ValidationError
 
 # Match the first ```yaml fenced block. DOTALL so `.` spans newlines; the
 # capture group is non-greedy so we stop at the first closing ``` on its own
 # line.
 _YAML_BLOCK_RE = re.compile(r"```yaml\s*\n(.*?)\n```", re.DOTALL)
+
+# Strip surrounding whitespace then require at least one character. This
+# rejects both `""` and `"   "` while letting normal labels through.
+NonEmptyStr = Annotated[str, StringConstraints(min_length=1, strip_whitespace=True)]
 
 
 class Prompt(BaseModel):
@@ -27,19 +32,24 @@ class Prompt(BaseModel):
 
     Brand and model are plain strings — not a `Literal` — because DESIGN.md
     explicitly allows extending the prompts file without code changes. Empty
-    strings are rejected so that downstream voting can rely on truthy labels.
+    or whitespace-only strings are rejected so that downstream voting can rely
+    on truthy labels. The model is frozen (immutable value object) and forbids
+    unknown fields so that typos like `brnad:` surface as validation errors.
     """
 
-    text: str = Field(min_length=1)
-    brand: str = Field(min_length=1)
-    model: str = Field(min_length=1)
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    text: NonEmptyStr
+    brand: NonEmptyStr
+    model: NonEmptyStr
 
 
 def load_prompts(path: Path) -> list[Prompt]:
     """Load and validate the prompts file.
 
-    If `path` ends with `.md`, the first ```yaml fenced block is extracted and
-    parsed. Otherwise the file is parsed as YAML directly.
+    If `path` ends with `.md` (case-insensitive), the first ```yaml fenced
+    block is extracted and parsed. Otherwise the file is parsed as YAML
+    directly.
 
     Raises:
         FileNotFoundError: if the path does not exist.
@@ -48,11 +58,14 @@ def load_prompts(path: Path) -> list[Prompt]:
             - YAML parse failure
             - missing top-level `prompts:` key
             - `prompts` is not a list
-            - a prompt entry fails validation (missing/empty field)
+            - `prompts` is an empty list
+            - a prompt entry fails validation (missing/empty/whitespace-only
+              field, or an unknown field)
     """
-    text = Path(path).read_text(encoding="utf-8")
+    p = Path(path)
+    text = p.read_text(encoding="utf-8")
 
-    if Path(path).suffix == ".md":
+    if p.suffix.lower() == ".md":
         match = _YAML_BLOCK_RE.search(text)
         if match is None:
             raise ValueError(f"no ```yaml fenced block found in {path}")
@@ -71,6 +84,9 @@ def load_prompts(path: Path) -> list[Prompt]:
     entries = data["prompts"]
     if not isinstance(entries, list):
         raise ValueError(f"'prompts' must be a list in {path}, got {type(entries).__name__}")
+
+    if not entries:
+        raise ValueError(f"'prompts' list is empty in {path}")
 
     try:
         return [Prompt.model_validate(entry) for entry in entries]

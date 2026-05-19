@@ -7,6 +7,14 @@ and the "Unknown" rejection-class pattern.
 The loader at `services/inference-worker/app/prompts.py` extracts the YAML block
 below directly.
 
+Schema: each entry is `{text, brand, model}` — all required, non-empty strings.
+
+`brand` and `model` are used as identity keys; whitespace is trimmed but case
+matters (`Gibson` and `gibson` are distinct classes).
+
+> **Warning:** The loader extracts the **first** ```yaml fenced block in this
+> file — do not put unrelated YAML before this one.
+
 ```yaml
 prompts:
   - text: "a photograph of a Gibson Les Paul electric guitar"
