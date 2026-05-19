@@ -9,6 +9,7 @@ The :class:`TrackRegistry` answers two questions the pipeline needs:
 from __future__ import annotations
 
 import pytest
+
 from app.tracks import TrackRegistry
 
 # A bbox area fraction that is comfortably above the small-bbox skip

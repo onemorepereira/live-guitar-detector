@@ -23,6 +23,11 @@ ignore = [
     "E501", # line too long — formatter handles wrapping
 ]
 
+[tool.ruff.lint.isort]
+# Each service ships its own top-level `app` package; treat it as first-party
+# everywhere so test files group their imports correctly.
+known-first-party = ["app"]
+
 [tool.ruff.format]
 # Defaults: double quotes, preserve magic trailing commas, LF line endings.
 

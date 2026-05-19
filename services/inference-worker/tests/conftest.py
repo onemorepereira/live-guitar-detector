@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pytest
+
 from app.config import Settings
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
