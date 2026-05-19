@@ -11,6 +11,7 @@ same name when `env_prefix=""`.
 
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -24,17 +25,17 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://redis:6379/0"
 
     # YOLO detector
-    DETECT_CONF: float = 0.35
-    DETECT_IOU: float = 0.5
-    DETECT_IMGSZ: int = 416
+    DETECT_CONF: float = Field(0.35, ge=0.0, le=1.0)
+    DETECT_IOU: float = Field(0.5, ge=0.0, le=1.0)
+    DETECT_IMGSZ: int = Field(416, ge=32)
 
     # MobileCLIP classifier
-    CLIP_INPUT_SIZE: int = 224
+    CLIP_INPUT_SIZE: int = Field(224, ge=1)
 
     # Rolling-window voting
-    VOTE_WINDOW: int = 15
-    VOTE_STABLE_MIN: int = 8
-    VOTE_STABLE_CONF: float = 0.55
+    VOTE_WINDOW: int = Field(15, ge=1)
+    VOTE_STABLE_MIN: int = Field(8, ge=1)
+    VOTE_STABLE_CONF: float = Field(0.55, ge=0.0, le=1.0)
 
     # Filesystem paths
     MODELS_DIR: Path = Path("/models")
@@ -42,6 +43,6 @@ class Settings(BaseSettings):
 
     # OpenVINO runtime
     OPENVINO_DEVICE: str = "CPU"
-    OPENVINO_THREADS: int = 0  # 0 = auto
+    OPENVINO_THREADS: int = Field(0, ge=0)  # 0 = auto
 
     model_config = SettingsConfigDict(env_file=".env", env_prefix="")
