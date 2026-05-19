@@ -1,0 +1,41 @@
+# Root workspace-level tooling config.
+#
+# This file intentionally does NOT define [project] metadata — the repo root is
+# not an installable package. Each service under services/ owns its own
+# pyproject.toml with its own deps and packaging config, but inherits the
+# style/format defaults declared here (line length 100, target-version py311).
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+    "SIM", # flake8-simplify
+    "RUF", # ruff-specific rules
+]
+ignore = [
+    "E501", # line too long — formatter handles wrapping
+]
+
+[tool.ruff.format]
+# Defaults: double quotes, preserve magic trailing commas, LF line endings.
+
+[tool.black]
+# Kept for IDE compatibility. Pre-commit uses ruff-format as the canonical
+# formatter; this block ensures editors that invoke black still match style.
+line-length = 100
+target-version = ["py311"]
+
+[tool.pytest.ini_options]
+testpaths = ["services"]
+addopts = "-ra --strict-markers"
+markers = [
+    "requires_model: test needs model weights downloaded locally",
+    "requires_aiortc_peer: test needs a live aiortc WebRTC peer",
+]
