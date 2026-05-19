@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from app.voting import SmoothedLabel, TrackVote  # noqa: F401
+from app.voting import SmoothedLabel, TrackVote
 
 
 def make_label(brand: str = "Gibson", model: str = "Les Paul", conf: float = 0.9) -> dict:
@@ -22,9 +22,10 @@ def test_consistent_label_becomes_stable_after_min_samples():
     for _ in range(8):
         v.update(make_label("Gibson", "Les Paul", 0.9))
     out = v.current()
+    assert isinstance(out, SmoothedLabel)
     assert out.label == {"brand": "Gibson", "model": "Les Paul"}
     assert out.stable is True
-    assert out.confidence > 0.55
+    assert out.confidence == pytest.approx(1.0)
 
 
 def test_below_stable_min_is_not_stable():
@@ -62,6 +63,7 @@ def test_window_eviction():
         v.update(make_label("Fender", "Stratocaster", 0.9))
     out = v.current()
     assert out.label == {"brand": "Fender", "model": "Stratocaster"}
+    assert out.samples == 5  # window=5, deque is full
 
 
 def test_smoothed_confidence_is_ratio_of_winner_to_total():
@@ -72,3 +74,34 @@ def test_smoothed_confidence_is_ratio_of_winner_to_total():
     out = v.current()
     # winner weight 1.6 / total 2.0 = 0.8
     assert out.confidence == pytest.approx(0.8, abs=0.01)
+
+
+def test_unknown_wins_tie_against_real_label():
+    """When Unknown and a real label tie on weight, Unknown wins (conservative)."""
+    v = TrackVote(window=4, stable_min=2, stable_conf=0.4)
+    v.update(make_label("Gibson", "Les Paul", 0.5))
+    v.update(make_label("Unknown", "Unknown", 0.5))
+    out = v.current()
+    assert out.label is None  # Unknown won the tie
+    assert out.stable is False
+
+
+def test_lex_tiebreak_between_real_labels():
+    """When two real labels tie on weight, lex order on (brand, model) decides."""
+    v = TrackVote(window=4, stable_min=2, stable_conf=0.4)
+    v.update(make_label("Gibson", "Les Paul", 0.5))
+    v.update(make_label("Fender", "Stratocaster", 0.5))
+    out = v.current()
+    # "Fender" < "Gibson" lexicographically
+    assert out.label == {"brand": "Fender", "model": "Stratocaster"}
+
+
+def test_window_size_one_stabilizes_immediately():
+    """With window=1, a single sample is sufficient to be 'stable' when stable_min=1."""
+    v = TrackVote(window=1, stable_min=1, stable_conf=0.5)
+    v.update(make_label("Gibson", "Les Paul", 0.9))
+    out = v.current()
+    assert out.label == {"brand": "Gibson", "model": "Les Paul"}
+    assert out.confidence == pytest.approx(1.0)
+    assert out.stable is True
+    assert out.samples == 1

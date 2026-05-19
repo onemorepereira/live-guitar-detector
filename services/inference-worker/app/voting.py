@@ -38,7 +38,17 @@ class TrackVote:
         for brand, model, conf in self._buf:
             weights[(brand, model)] += conf
             total += conf
-        (brand, model), w = max(weights.items(), key=lambda kv: kv[1])
+        # Deterministic tie-breaking policy (see DESIGN.md §5.4):
+        #   1. Highest weight wins.
+        #   2. On equal weights: Unknown wins (conservative — don't lock onto
+        #      a wrong ID).
+        #   3. On equal weights among non-Unknown labels: lex-min on
+        #      (brand, model) — deterministic, independent of insertion order.
+        max_weight = max(weights.values())
+        tied = [(k, w) for k, w in weights.items() if w == max_weight]
+        unknown_ties = [(k, w) for k, w in tied if k[0] == "Unknown" or k[1] == "Unknown"]
+        chosen = unknown_ties[0] if unknown_ties else min(tied, key=lambda kv: kv[0])
+        (brand, model), w = chosen
         smoothed_conf = w / total if total > 0 else 0.0
         is_unknown = brand == "Unknown" or model == "Unknown"
         label = None if is_unknown else {"brand": brand, "model": model}
