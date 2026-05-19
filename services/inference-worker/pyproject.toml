@@ -27,6 +27,13 @@ dev = [
     "pytest-cov>=5,<6",
     "fakeredis>=2.21,<3",
 ]
+# Only needed by scripts/download_models.py to export PyTorch -> ONNX -> IR.
+# Not required at inference runtime; install with `pip install -e .[export]`
+# before running the export script.
+export = [
+    "onnx>=1.17,<2",
+    "onnxscript>=0.1,<1",
+]
 
 [tool.setuptools.packages.find]
 include = ["app", "app.*"]
