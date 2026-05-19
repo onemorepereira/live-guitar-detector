@@ -1,4 +1,6 @@
 .PHONY: install lint test build-images push-images dev help
+.DEFAULT_GOAL := help
+
 help:    ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-20s %s\n", $$1, $$2}'
 install: ## Install all dev deps
