@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# Node / frontend
+node_modules/
+services/frontend/dist/
+services/gateway/app/static/
+.parcel-cache/
+
+# Model weights & artifacts (downloaded / exported)
+services/inference-worker/app/models/
+*.pt
+*.onnx
+*.xml
+*.bin
+*_openvino_model/
+
+# Local env / secrets
+.env
+.env.local
+*.key
+*.pem
+kubeconfig
+*.kubeconfig
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Test artifacts
+.coverage
+htmlcov/
+coverage.xml
+
+# Local data
+data/
+fixtures/local/
