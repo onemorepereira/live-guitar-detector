@@ -42,5 +42,6 @@ testpaths = ["services"]
 addopts = "-ra --strict-markers"
 markers = [
     "requires_model: test needs model weights downloaded locally",
+    "requires_real_fixtures: test needs real guitar fixture images (not synthetic placeholders)",
     "requires_aiortc_peer: test needs a live aiortc WebRTC peer",
 ]

@@ -9,6 +9,10 @@ description = "Inference worker: YOLO detection + MobileCLIP classification over
 requires-python = ">=3.11,<3.12"
 dependencies = [
     "ultralytics>=8.3,<8.4",
+    # ByteTrack's hungarian-assignment dependency. Not declared by
+    # ultralytics; without it the first call to `model.track(...)` performs
+    # a pip auto-install at runtime, which we don't want in production.
+    "lap>=0.5.12,<1",
     "open-clip-torch>=2.24,<3",
     "openvino>=2024.4,<2025",
     "opencv-python-headless>=4.10,<5",

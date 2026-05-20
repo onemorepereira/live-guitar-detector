@@ -46,6 +46,11 @@ kubeconfig
 htmlcov/
 coverage.xml
 
+# Per-developer opt-in marker for `requires_real_fixtures` tests. The
+# placeholder JPEGs in tests/fixtures/images/ are synthetic; each developer
+# touches REAL.txt after swapping in real guitar photos locally.
+services/inference-worker/tests/fixtures/images/REAL.txt
+
 # Local data
 data/
 fixtures/local/
