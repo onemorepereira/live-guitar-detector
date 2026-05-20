@@ -154,6 +154,11 @@ class Pipeline:
         self._settings = settings
         self._tracks = TrackRegistry()
         self._votes: dict[int, TrackVote] = {}
+        # Counter exposed for diagnostics: if this dominates total detections
+        # in a long session, ByteTrack is misconfigured (persist=False,
+        # confirmation threshold too high, etc.) and the pipeline is silently
+        # discarding every box. Read by scripts/benchmark.py.
+        self.unconfirmed_skips: int = 0
 
     def process_frame(
         self,
@@ -192,6 +197,7 @@ class Pipeline:
             # rather than ship a TrackDetection with a None track_id which
             # downstream consumers cannot join on across frames.
             if det.track_id is None:
+                self.unconfirmed_skips += 1
                 continue
 
             tid: int = det.track_id
