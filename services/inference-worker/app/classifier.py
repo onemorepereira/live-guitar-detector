@@ -91,6 +91,13 @@ class Classifier:
         self._image_model = core.compile_model(str(image_xml), device_name="CPU")
         self._text_model = core.compile_model(str(text_xml), device_name="CPU")
 
+        # Bind the single named output of each tower so we read it back by name
+        # rather than by dict-iteration order. If a future re-export adds extra
+        # outputs (e.g., intermediate features), this fails loudly at startup
+        # instead of silently picking the wrong tensor.
+        self._image_output = self._image_model.output("image_features")
+        self._text_output = self._text_model.output("text_features")
+
         self._text_features = self._compute_text_features(self._prompts)
 
     # ------------------------------------------------------------------
@@ -116,9 +123,7 @@ class Classifier:
         """
         prepped = self._preprocess(image_bgr)
         image_out = self._image_model(prepped)
-        # OpenVINO compiled_model returns a dict keyed by Output port; for our
-        # single-output exports there's only one entry. Take the first.
-        image_feat = next(iter(image_out.values()))[0].astype(np.float32)
+        image_feat = image_out[self._image_output][0].astype(np.float32)
         image_feat = image_feat / max(float(np.linalg.norm(image_feat)), 1e-12)
 
         # Cosine similarity against the precomputed (and already-normalized)
@@ -154,6 +159,10 @@ class Classifier:
         """
         import open_clip
 
+        # Apple's MobileCLIP family reuses OpenAI CLIP's BPE vocabulary and
+        # does not register a HuggingFace tokenizer in OpenCLIP, so
+        # get_tokenizer() returns SimpleTokenizer — that is the canonical
+        # tokenizer for these models, not a fallback.
         tokenizer = open_clip.get_tokenizer(self._model_name)
 
         feats: list[np.ndarray] = []
@@ -162,7 +171,7 @@ class Classifier:
             # the same shape/dtype on the numpy side.
             tokens = tokenizer([p.text]).numpy().astype(np.int64)
             out = self._text_model(tokens)
-            feat = next(iter(out.values()))  # (1, D)
+            feat = out[self._text_output]  # (1, D)
             feats.append(np.asarray(feat[0], dtype=np.float32))
 
         stacked = np.stack(feats).astype(np.float32)  # (N, D)
@@ -181,6 +190,11 @@ class Classifier:
         """
         if image_bgr.ndim != 3 or image_bgr.shape[2] != 3:
             raise ValueError(f"classifier expects HxWx3 BGR image, got shape {image_bgr.shape}")
+        if image_bgr.dtype != np.uint8:
+            # A float32 image already in [0, 1] would silently round-trip into
+            # the [0, 1/255] range after the /255 step below and produce
+            # garbage features. Reject upfront.
+            raise ValueError(f"classifier expects uint8 image, got dtype {image_bgr.dtype}")
 
         rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
 
