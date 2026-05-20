@@ -13,7 +13,11 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures"
 # worker root and ``parents[1] / "app" / "models"`` is where
 # ``scripts/download_models.py`` writes its OpenVINO IR output.
 _WORKER_ROOT = Path(__file__).resolve().parents[1]
-_YOLO_IR_XML = _WORKER_ROOT / "app" / "models" / "yolov8n-oiv7-fp32" / "yolov8n-oiv7.xml"
+_MODELS_ROOT = _WORKER_ROOT / "app" / "models"
+_YOLO_IR_XML = _MODELS_ROOT / "yolov8n-oiv7-fp32" / "yolov8n-oiv7.xml"
+_CLIP_IMAGE_IR_XML = _MODELS_ROOT / "mobileclip-image-fp16" / "image.xml"
+_CLIP_TEXT_IR_XML = _MODELS_ROOT / "mobileclip-text-fp16" / "text.xml"
+_REQUIRED_IRS = (_YOLO_IR_XML, _CLIP_IMAGE_IR_XML, _CLIP_TEXT_IR_XML)
 
 # Marker file the developer touches after dropping real fixture JPEGs into
 # ``tests/fixtures/images/``. Cheap, env-var-free, and explicit: opting in
@@ -41,9 +45,12 @@ def pytest_collection_modifyitems(config, items):
 
     Two markers are handled here:
 
-    * ``requires_model`` — skipped unless the YOLO OpenVINO IR exists on
-      disk. The runtime cost of downloading + exporting the model (see
-      ``scripts/download_models.py``) is too high to require unconditionally.
+    * ``requires_model`` — skipped unless the YOLO + MobileCLIP OpenVINO IRs
+      all exist on disk. The runtime cost of downloading + exporting the
+      models (see ``scripts/download_models.py``) is too high to require
+      unconditionally. We gate the marker on all three IRs together because
+      they ship from the same ``download_models.py all`` invocation; partial
+      installs are a developer-error case, not a normal mode.
 
     * ``requires_real_fixtures`` — skipped unless
       ``tests/fixtures/images/REAL.txt`` exists. The committed fixture JPEGs
@@ -53,9 +60,14 @@ def pytest_collection_modifyitems(config, items):
       replaced the placeholders" by touching the marker file.
     """
     skip_model = None
-    if not _YOLO_IR_XML.exists():
+    missing = [p for p in _REQUIRED_IRS if not p.exists()]
+    if missing:
+        missing_list = ", ".join(str(p) for p in missing)
         skip_model = pytest.mark.skip(
-            reason=f"YOLO IR not found at {_YOLO_IR_XML}; run scripts/download_models.py"
+            reason=(
+                f"Required model IR(s) not found: {missing_list}; "
+                "run scripts/download_models.py all"
+            )
         )
 
     skip_real = None
