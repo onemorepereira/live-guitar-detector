@@ -40,6 +40,10 @@ target-version = ["py311"]
 [tool.pytest.ini_options]
 testpaths = ["services"]
 addopts = "-ra --strict-markers"
+# `auto` lets async tests omit `@pytest.mark.asyncio`. Safe for the worker's
+# sync tests — pytest-asyncio only intercepts coroutines, sync functions are
+# untouched.
+asyncio_mode = "auto"
 markers = [
     "requires_model: test needs model weights downloaded locally",
     "requires_real_fixtures: test needs real guitar fixture images (not synthetic placeholders)",
