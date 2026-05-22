@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import AsyncIterator
 
 import fakeredis.aioredis
@@ -9,6 +10,25 @@ import httpx
 import pytest
 
 from app.main import app as gateway_app
+
+
+def pytest_collection_modifyitems(config, items):
+    """Auto-skip tests gated on the ``requires_aiortc_peer`` marker.
+
+    Spinning up a real aiortc peer pair pulls in libsrtp/libvpx and can be
+    flaky in minimal/CI environments. For Phase 1 we always skip unless the
+    developer opts in via ``RUN_AIORTC_TESTS=1``; Phase 4 K3s smoke tests
+    will exercise the real path. The env-var gate keeps the opt-in cheap
+    (no marker file to maintain).
+    """
+    if os.environ.get("RUN_AIORTC_TESTS") == "1":
+        return
+    skip_aiortc = pytest.mark.skip(
+        reason="set RUN_AIORTC_TESTS=1 to enable aiortc peer integration tests"
+    )
+    for item in items:
+        if "requires_aiortc_peer" in item.keywords:
+            item.add_marker(skip_aiortc)
 
 
 @pytest.fixture
