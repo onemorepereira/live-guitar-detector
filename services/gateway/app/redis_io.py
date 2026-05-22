@@ -19,6 +19,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 import redis.asyncio as redis_async
+from loguru import logger
 
 # DESIGN.md §5.3 — backpressure caps on the streams. MAXLEN ~ is the
 # approximate form (faster trim than the strict "=" form) — Redis is
@@ -116,9 +117,20 @@ async def consume_detections(
                 cursor = entry_id
                 blob = fields.get(b"event")
                 if blob is None:
+                    logger.warning(
+                        "dropped detection entry id={} on {}: missing 'event' field",
+                        entry_id,
+                        key,
+                    )
                     continue
                 try:
                     yield json.loads(blob)
-                except json.JSONDecodeError:
+                except json.JSONDecodeError as exc:
                     # Malformed event — skip but don't crash the consumer.
+                    logger.warning(
+                        "dropped detection entry id={} on {}: invalid JSON: {}",
+                        entry_id,
+                        key,
+                        exc,
+                    )
                     continue
