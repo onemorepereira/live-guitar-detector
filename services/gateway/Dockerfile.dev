@@ -1,0 +1,33 @@
+# Dev image for the gateway. Bind-mounts source from the host; uvicorn
+# auto-reloads on file change. NOT for production — the prod Dockerfile
+# lands in Task 3.2.
+
+FROM python:3.11-slim AS dev
+
+# aiortc runtime deps (debian bookworm names).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libavformat59 \
+        libavcodec59 \
+        libavutil57 \
+        libswscale6 \
+        libsrtp2-1 \
+        libopus0 \
+        libvpx7 \
+        ffmpeg \
+        gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy pyproject + source for the install layer. The bind-mount in
+# docker-compose will override /app/app at runtime; editable install
+# points at /app so reloads see the mounted source.
+COPY pyproject.toml /app/pyproject.toml
+COPY app /app/app
+COPY tests /app/tests
+RUN pip install --no-cache-dir -e ".[dev]"
+
+ENV PYTHONUNBUFFERED=1
+EXPOSE 8000
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

@@ -1,0 +1,75 @@
+# Development docker-compose stack.
+#
+# Brings up Redis + gateway + inference worker with bind-mounted source
+# for hot-reload. The frontend is NOT containerized here — run it on the
+# host with `cd services/frontend && npm run dev` (Vite proxies /api and
+# /ws to localhost:8000).
+#
+# Models for the worker are bind-mounted from
+# services/inference-worker/app/models (populated by Task 1.5).
+# Prompts are bind-mounted from docs/prompts.md; the prompts loader
+# (Task 1.4) extracts the YAML block from a .md file when the path ends
+# in `.md`, which is why PROMPTS_FILE overrides the DESIGN.md default
+# of /config/prompts.yaml.
+
+services:
+  redis:
+    image: redis:7.2-alpine
+    ports:
+      - "6379:6379"
+    command:
+      [
+        "redis-server",
+        "--maxmemory",
+        "256mb",
+        "--maxmemory-policy",
+        "allkeys-lru",
+        "--appendonly",
+        "no",
+      ]
+    networks:
+      - internal
+
+  gateway:
+    build:
+      context: ./services/gateway
+      dockerfile: Dockerfile.dev
+    depends_on:
+      - redis
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      LOG_LEVEL: INFO
+      MAX_INGEST_FPS: "30"
+      JPEG_QUALITY: "75"
+      SESSION_IDLE_TIMEOUT_S: "10"
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./services/gateway/app:/app/app
+    networks:
+      - internal
+
+  inference-worker:
+    build:
+      context: ./services/inference-worker
+      dockerfile: Dockerfile.dev
+    depends_on:
+      - redis
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      LOG_LEVEL: INFO
+      MODELS_DIR: /models
+      PROMPTS_FILE: /config/prompts.md
+      DETECT_CONF: "0.35"
+      DETECT_IOU: "0.5"
+      DETECT_IMGSZ: "416"
+    volumes:
+      - ./services/inference-worker/app:/app/app
+      - ./services/inference-worker/app/models:/models:ro
+      - ./docs/prompts.md:/config/prompts.md:ro
+    networks:
+      - internal
+
+networks:
+  internal:
+    driver: bridge

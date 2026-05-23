@@ -1,4 +1,4 @@
-.PHONY: install lint test build-images push-images dev help
+.PHONY: install lint test build-images push-images dev dev-down dev-logs help
 .DEFAULT_GOAL := help
 
 help:    ## Show this help
@@ -9,8 +9,14 @@ lint:    ## Run linters across services
 	@echo "TODO: lint"
 test:    ## Run all unit tests
 	@echo "TODO: test"
-dev:     ## Run local dev stack (docker-compose)
-	@echo "TODO: dev"
+dev:     ## Run local dev stack (docker-compose: redis + gateway + worker)
+	@echo "Starting dev stack — frontend should be started separately with:"
+	@echo "    cd services/frontend && npm run dev"
+	docker compose up --build
+dev-down: ## Tear down the dev stack
+	docker compose down
+dev-logs: ## Tail dev stack logs
+	docker compose logs -f
 build-images: ## Build container images
 	@echo "TODO: build-images"
 push-images:  ## Push images to local registry

@@ -1,0 +1,30 @@
+# Dev image for the inference worker. Bind-mounts source + the local
+# model dir from the host. NOT for production — Task 3.3 ships the prod
+# image with models baked in and may switch to the openvino/ubuntu22_runtime
+# base for size/perf reasons.
+#
+# We use python:3.11-slim here (rather than the OpenVINO base, which ships
+# Python 3.10) so the worker's `requires-python = >=3.11,<3.12` pin holds
+# without relaxation. OpenVINO is installed via pip as a normal runtime dep.
+
+FROM python:3.11-slim AS dev
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libgl1 \
+        libglib2.0-0 \
+        libgomp1 \
+        gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY pyproject.toml /app/pyproject.toml
+COPY app /app/app
+COPY tests /app/tests
+RUN pip install --no-cache-dir -e ".[dev]"
+
+ENV PYTHONUNBUFFERED=1
+ENV MODELS_DIR=/models
+ENV PROMPTS_FILE=/config/prompts.md
+
+CMD ["python3", "-m", "app.main"]
