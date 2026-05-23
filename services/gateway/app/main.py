@@ -14,9 +14,11 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager, suppress
+from pathlib import Path
 
 import redis.asyncio as redis_async
 from fastapi import APIRouter, FastAPI, HTTPException, Request, Response, WebSocket
+from fastapi.staticfiles import StaticFiles
 from loguru import logger
 
 from app.config import Settings
@@ -189,3 +191,24 @@ async def readyz(response: Response) -> dict:
     except Exception as e:
         response.status_code = 503
         return {"ok": False, "error": str(e)}
+
+
+# ---------------------------------------------------------------------------
+# Static SPA mount.
+#
+# Mounted LAST so every route registered above (the /api router, /ws, the
+# health probes) takes precedence — FastAPI route matching is order-
+# sensitive, and a "/" mount with html=True would otherwise swallow them.
+#
+# The mount is conditional on the directory existing because the static
+# bundle is baked in only by the production Dockerfile (Task 3.2). In
+# dev (pytest, local uvicorn without docker) /app/static is absent and
+# we want main.py to import cleanly anyway.
+#
+# html=True turns the mount into an SPA-aware server: GET / serves
+# index.html and unknown sub-paths fall back to index.html so client-
+# side routing works.
+# ---------------------------------------------------------------------------
+_STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
+if _STATIC_DIR.is_dir():
+    app.mount("/", StaticFiles(directory=str(_STATIC_DIR), html=True), name="static")
