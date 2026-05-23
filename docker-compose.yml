@@ -1,16 +1,29 @@
-# Development docker-compose stack.
+# Combined dev + prod docker-compose stack.
 #
-# Brings up Redis + gateway + inference worker with bind-mounted source
-# for hot-reload. The frontend is NOT containerized here — run it on the
-# host with `cd services/frontend && npm run dev` (Vite proxies /api and
-# /ws to localhost:8000).
+# Profiles:
+#   dev   → bind-mounted source, Dockerfile.dev, hot-reload.
+#   prod  → built production images (services/{gateway,inference-worker}/
+#           Dockerfile), no source bind-mounts.
 #
-# Models for the worker are bind-mounted from
-# services/inference-worker/app/models (populated by Task 1.5).
-# Prompts are bind-mounted from docs/prompts.md; the prompts loader
-# (Task 1.4) extracts the YAML block from a .md file when the path ends
-# in `.md`, which is why PROMPTS_FILE overrides the DESIGN.md default
-# of /config/prompts.yaml.
+# Usage:
+#   make dev    → docker compose --profile dev up --build
+#   make prod   → docker compose --profile prod up --build
+#
+# `redis` is untagged so it joins whichever profile is active.
+#
+# Dev frontend: NOT containerized — run on the host with
+#     cd services/frontend && npm run dev
+# (Vite proxies /api and /ws to localhost:8000). In prod the frontend
+# bundle is baked into the gateway image (Task 3.2), so nothing extra
+# to start.
+#
+# Models for the dev worker are bind-mounted from
+# services/inference-worker/app/models (populated by Task 1.5). The prod
+# worker image bakes them at /models (Task 3.3).
+# Prompts are bind-mounted from docs/prompts.md in both profiles; the
+# prompts loader (Task 1.4) extracts the YAML block from a .md file
+# when the path ends in `.md`, which is why PROMPTS_FILE overrides the
+# DESIGN.md default of /config/prompts.yaml.
 
 services:
   redis:
@@ -30,7 +43,9 @@ services:
     networks:
       - internal
 
+  # ---- dev profile ----
   gateway:
+    profiles: ["dev"]
     build:
       context: ./services/gateway
       dockerfile: Dockerfile.dev
@@ -50,6 +65,7 @@ services:
       - internal
 
   inference-worker:
+    profiles: ["dev"]
     build:
       context: ./services/inference-worker
       dockerfile: Dockerfile.dev
@@ -66,6 +82,60 @@ services:
     volumes:
       - ./services/inference-worker/app:/app/app
       - ./services/inference-worker/app/models:/models:ro
+      - ./docs/prompts.md:/config/prompts.md:ro
+    networks:
+      - internal
+
+  # ---- prod profile ----
+  # Production-image variants. Built from services/{gateway,inference-worker}/
+  # Dockerfile (multi-stage, slim runtimes). No source bind-mounts —
+  # everything the services need is inside the image:
+  #   - gateway: SPA bundle baked at /app/static (from frontend-assets:dev).
+  #   - inference-worker: OpenVINO models baked at /models.
+  # The one exception is docs/prompts.md, mounted read-only as a
+  # configmap-style override; in K8s (Phase 4) this becomes a real
+  # ConfigMap. Local prod testing exercises the same /config/prompts.md
+  # path the K8s manifest will use.
+  gateway-prod:
+    profiles: ["prod"]
+    build:
+      context: ./services/gateway
+      dockerfile: Dockerfile
+      args:
+        FRONTEND_IMAGE: guitar-detect/frontend-assets:dev
+    image: guitar-detect/gateway:dev
+    depends_on:
+      - redis
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      LOG_LEVEL: INFO
+      MAX_INGEST_FPS: "30"
+      JPEG_QUALITY: "75"
+      SESSION_IDLE_TIMEOUT_S: "10"
+    ports:
+      - "8000:8000"
+    networks:
+      - internal
+
+  inference-worker-prod:
+    profiles: ["prod"]
+    build:
+      context: ./services/inference-worker
+      dockerfile: Dockerfile
+    image: guitar-detect/inference-worker:dev
+    depends_on:
+      - redis
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      LOG_LEVEL: INFO
+      MODELS_DIR: /models
+      PROMPTS_FILE: /config/prompts.md
+      DETECT_CONF: "0.35"
+      DETECT_IOU: "0.5"
+      DETECT_IMGSZ: "416"
+    volumes:
+      # See header note: configmap-style read-only override; K8s replaces
+      # this with a real ConfigMap in Phase 4.
       - ./docs/prompts.md:/config/prompts.md:ro
     networks:
       - internal
