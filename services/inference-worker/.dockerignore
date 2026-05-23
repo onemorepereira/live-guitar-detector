@@ -1,0 +1,18 @@
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.egg-info
+.pytest_cache
+.ruff_cache
+.coverage
+htmlcov
+tests
+Dockerfile.dev
+.DS_Store
+*.log
+# Models are baked in via download_models.py at build time, not copied
+# from host — exclude any locally-downloaded weights/IRs (~500 MB) so
+# they don't inflate the build context.
+app/models
+yolov8n-oiv7.pt
