@@ -48,7 +48,12 @@ ENV PYTHONPATH="/install/lib/python3.11/site-packages"
 # so source-only changes don't invalidate it. scripts/ is copied last so
 # edits to non-script files in the source tree don't bust this layer.
 COPY scripts ./scripts
-RUN mkdir -p /models && python scripts/download_models.py all --out /models
+RUN mkdir -p /models && python scripts/download_models.py all --out /models \
+    && rm -rf /models/raw
+# The /models/raw subdir holds the source PyTorch .pt downloads (~250 MB
+# combined: YOLO + MobileCLIP state dict). Only the OpenVINO IR dirs
+# (yolov8n-oiv7-fp32/, mobileclip-image-fp16/, mobileclip-text-fp16/)
+# are loaded at runtime — strip the raws to keep the image lean.
 
 # ---- runtime stage ----
 FROM python:3.11.10-slim AS runtime
