@@ -1,0 +1,94 @@
+# Integration test stack.
+#
+# Brings up Redis + gateway + inference-worker (mirroring docker-compose.yml)
+# plus a harness container that runs both the synthetic frame producer and
+# the assert subscriber in a single Python process — see
+# services/inference-worker/tests/integration/harness.py for the design.
+#
+# Pass/fail is the exit code of the ``harness`` service:
+#   0 -> wire path works end-to-end against real Redis (no WebRTC, no browser).
+#   non-zero -> a contract was violated; check the logs.
+#
+# Usage: ``make test-integration``.
+
+services:
+  redis:
+    image: redis:7.2-alpine
+    command:
+      [
+        "redis-server",
+        "--maxmemory",
+        "256mb",
+        "--maxmemory-policy",
+        "allkeys-lru",
+        "--appendonly",
+        "no",
+      ]
+    networks:
+      - internal
+
+  gateway:
+    build:
+      context: ./services/gateway
+      dockerfile: Dockerfile.dev
+    depends_on:
+      - redis
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      LOG_LEVEL: INFO
+      # Generous idle timeout so the sweeper doesn't yank the session out
+      # from under the harness while it's still publishing frames.
+      SESSION_IDLE_TIMEOUT_S: "60"
+    networks:
+      - internal
+
+  inference-worker:
+    build:
+      context: ./services/inference-worker
+      dockerfile: Dockerfile.dev
+    depends_on:
+      - redis
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      LOG_LEVEL: INFO
+      MODELS_DIR: /models
+      PROMPTS_FILE: /config/prompts.md
+    volumes:
+      - ./services/inference-worker/app/models:/models:ro
+      - ./docs/prompts.md:/config/prompts.md:ro
+    networks:
+      - internal
+
+  harness:
+    build:
+      context: ./services/inference-worker
+      dockerfile: Dockerfile.dev
+    depends_on:
+      - gateway
+      - inference-worker
+    command:
+      - python3
+      - tests/integration/harness.py
+      - --gateway-http
+      - http://gateway:8000
+      - --gateway-ws
+      - ws://gateway:8000
+      - --redis
+      - redis://redis:6379/0
+      - --duration-s
+      - "10"
+      - --fps
+      - "15"
+      - --min-events
+      - "1"
+    volumes:
+      - ./services/inference-worker/tests/fixtures/images:/fixtures:ro
+    environment:
+      PYTHONUNBUFFERED: "1"
+      FIXTURES_DIR: /fixtures
+    networks:
+      - internal
+
+networks:
+  internal:
+    driver: bridge
