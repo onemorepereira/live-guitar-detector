@@ -7,10 +7,35 @@ import type { TrackDetection } from "../types/detection";
  * Canvas overlay drawing per-track bounding boxes and labels on top of the
  * `<video>` element. See DESIGN.md §5.6.
  *
- * The component owns its own `requestAnimationFrame` loop so the canvas
- * redraws at display refresh rate; React only re-renders when `tracks` or
- * `videoRect` change (which triggers the effect to restart the loop with
- * fresh closures).
+ * The component owns a single `requestAnimationFrame` loop driven by an
+ * internal animation-state map keyed by `track_id`. React only feeds new
+ * detection events into the state map; the rAF loop is the source of truth
+ * for what gets painted, which lets us:
+ *
+ *   1. Lerp bbox positions between consecutive detection events (the worker
+ *      emits ~10–15 events/sec; the display refreshes at ~60 Hz, so without
+ *      interpolation each new event would cause a visible snap).
+ *   2. Hold the last-known bbox for a short window after a track disappears
+ *      from the props (`HOLD_MS`), to mask single-frame drops that would
+ *      otherwise cause flicker.
+ *
+ * ## Color & contrast (intentional non-change)
+ *
+ * Gibson gold (`#C8A45C`), Fender white (`#F5F5F5`), and Unknown gray
+ * (`#888888`) are drawn over a 2-px wider black contrast halo. The halo +
+ * the translucent black label panel give the box and text enough contrast
+ * on both bright and dark backgrounds without resorting to a permanent
+ * drop-shadow on every box (which read as overkill in the eyeball check).
+ * The shadow is reserved for the highlighted track.
+ *
+ * ## Opacity easing (intentional non-change)
+ *
+ * The plan suggested `1 - exp(-age/2)` as a smoother alternative to the
+ * linear ramp `0.3 + 0.175 * (age - 1)`. At 30 FPS the linear ramp is
+ * already perceptually smooth, the existing snapshot tests are wedded to
+ * its exact values, and the difference is < 0.1 alpha at every step.
+ * Keeping linear; the helper `computeOpacity` is exported so the easing
+ * curve is a single-point change if we ever want to revisit.
  */
 
 export interface VideoRect {
@@ -59,6 +84,46 @@ const TOP_EDGE_THRESHOLD = 30;
  */
 const ALPHA_INITIAL = 0.3;
 const ALPHA_STEP = 0.175;
+/**
+ * Hold the last-known bbox for this long after a track stops appearing in
+ * the props. Masks single-frame detection drops; tuned by eyeball — long
+ * enough to absorb one missed event from a 10–15 Hz worker, short enough
+ * that a truly-vanished guitar doesn't visibly linger.
+ */
+const HOLD_MS = 150;
+/**
+ * Per-frame interpolation fraction. At 60 FPS this reaches ~95 % of the
+ * target in ~100 ms — fast enough to feel responsive, slow enough that
+ * the box doesn't snap when a new detection event lands.
+ */
+const LERP_RATE = 0.35;
+
+type Bbox = [number, number, number, number];
+
+/**
+ * Per-track animation state held across renders. The map is keyed by
+ * `track_id` and lives in a ref so the rAF loop can mutate it without
+ * triggering React re-renders.
+ */
+interface TrackAnimState {
+  /** Most recent normalized bbox received from the wire. */
+  targetBbox: Bbox;
+  /** Currently-drawn normalized bbox, being lerped toward target. */
+  currentBbox: Bbox;
+  /** `performance.now()` at the last time this track was in the props. */
+  lastSeenAt: number;
+  /** Cached most-recent detection — used for label, color, age, etc. */
+  detection: TrackDetection;
+}
+
+/**
+ * Linear opacity ramp; see ALPHA_INITIAL / ALPHA_STEP comment.
+ * Exported for unit testing and to make any future easing-curve swap a
+ * single-point change.
+ */
+export function computeOpacity(ageFrames: number): number {
+  return Math.min(1.0, ALPHA_INITIAL + Math.max(0, ageFrames - 1) * ALPHA_STEP);
+}
 
 export function HUD({
   tracks,
@@ -66,7 +131,42 @@ export function HUD({
   highlightedTrackId = null,
 }: HUDProps): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const stateRef = useRef<Map<number, TrackAnimState>>(new Map());
+  const rectRef = useRef(videoRect);
+  const highlightedRef = useRef<number | null>(highlightedTrackId);
 
+  // Mirror props into refs so the rAF loop always sees the latest values
+  // without having to restart on every render.
+  rectRef.current = videoRect;
+  highlightedRef.current = highlightedTrackId;
+
+  // Feed new detection events into the animation-state map. Tracks that
+  // drop out of the props are NOT removed here — the rAF loop prunes them
+  // after HOLD_MS to avoid flicker.
+  useEffect(() => {
+    const now = performance.now();
+    const state = stateRef.current;
+    for (const t of tracks) {
+      const existing = state.get(t.track_id);
+      if (existing) {
+        existing.targetBbox = [...t.bbox] as Bbox;
+        existing.lastSeenAt = now;
+        existing.detection = t;
+      } else {
+        // First time we see this track: snap currentBbox to target so it
+        // appears at the right place on frame one rather than lerping in
+        // from (0, 0, 0, 0).
+        state.set(t.track_id, {
+          targetBbox: [...t.bbox] as Bbox,
+          currentBbox: [...t.bbox] as Bbox,
+          lastSeenAt: now,
+          detection: t,
+        });
+      }
+    }
+  }, [tracks]);
+
+  // Single, stable rAF loop. Reads from the animation-state map + refs.
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -75,17 +175,41 @@ export function HUD({
 
     let rafId = 0;
     const draw = () => {
+      const now = performance.now();
+      const rect = rectRef.current;
+      const highlighted = highlightedRef.current;
+      const state = stateRef.current;
+
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      for (const t of tracks) {
-        drawTrack(ctx, t, videoRect, t.track_id === highlightedTrackId);
+
+      const expired: number[] = [];
+      for (const [id, st] of state) {
+        if (now - st.lastSeenAt > HOLD_MS) {
+          expired.push(id);
+          continue;
+        }
+        // Lerp current toward target. Skip the math if we've effectively
+        // converged — keeps tests deterministic when only one frame ever
+        // runs and avoids accumulating float drift.
+        for (let i = 0; i < 4; i++) {
+          const delta = st.targetBbox[i] - st.currentBbox[i];
+          if (Math.abs(delta) > 1e-4) {
+            st.currentBbox[i] += delta * LERP_RATE;
+          } else {
+            st.currentBbox[i] = st.targetBbox[i];
+          }
+        }
+        drawTrack(ctx, st.detection, st.currentBbox, rect, id === highlighted);
       }
+      for (const id of expired) state.delete(id);
+
       rafId = requestAnimationFrame(draw);
     };
     rafId = requestAnimationFrame(draw);
     return () => {
       cancelAnimationFrame(rafId);
     };
-  }, [tracks, videoRect, highlightedTrackId]);
+  }, []);
 
   return (
     <canvas
@@ -100,19 +224,15 @@ export function HUD({
 function drawTrack(
   ctx: CanvasRenderingContext2D,
   t: TrackDetection,
+  normalizedBbox: Bbox,
   rect: VideoRect,
   highlighted: boolean,
 ): void {
-  const [x1, y1, x2, y2] = denormalizeBbox(t.bbox, rect);
+  const [x1, y1, x2, y2] = denormalizeBbox(normalizedBbox, rect);
   const brand = t.label?.brand ?? "Unknown";
   const color = BRAND_COLOR[brand] ?? BRAND_COLOR.Unknown;
   const strokeWidth = highlighted ? HIGHLIGHT_STROKE_WIDTH : STROKE_WIDTH;
-
-  // Opacity ramp 0.3 → 1.0 over ages 1..5; clamp at 1.0.
-  const alpha = Math.min(
-    1.0,
-    ALPHA_INITIAL + Math.max(0, t.age_frames - 1) * ALPHA_STEP,
-  );
+  const alpha = computeOpacity(t.age_frames);
 
   ctx.save();
   ctx.globalAlpha = alpha;

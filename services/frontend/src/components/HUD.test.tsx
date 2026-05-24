@@ -195,3 +195,119 @@ describe("HUD", () => {
     expect(shadowBlurs.some((b) => b > 0)).toBe(true);
   });
 });
+
+/**
+ * Tests for the lerp + hold behaviour need to step the rAF loop manually
+ * across multiple "frames" with controlled time, so they install their
+ * own shim that captures the latest scheduled callback. `stepFrame(t)`
+ * sets `performance.now()` to `t`, invokes the captured callback, and
+ * leaves the next callback queued for the following step.
+ */
+describe("HUD smoothing + hold", () => {
+  let lastCb: FrameRequestCallback | null = null;
+  let fakeNow = 0;
+  let savedRAF: typeof requestAnimationFrame;
+  let savedCAF: typeof cancelAnimationFrame;
+  let savedPerfNow: typeof performance.now;
+  let smoothCtx: SpyCtx;
+
+  beforeEach(() => {
+    smoothCtx = mockCtx();
+    HTMLCanvasElement.prototype.getContext = vi.fn(
+      () => smoothCtx.ctx,
+    ) as unknown as HTMLCanvasElement["getContext"];
+    savedRAF = globalThis.requestAnimationFrame;
+    savedCAF = globalThis.cancelAnimationFrame;
+    savedPerfNow = performance.now.bind(performance);
+    fakeNow = 0;
+    lastCb = null;
+    globalThis.requestAnimationFrame = ((cb: FrameRequestCallback) => {
+      lastCb = cb;
+      return 1 as unknown as number;
+    }) as typeof requestAnimationFrame;
+    globalThis.cancelAnimationFrame = ((_id: number) => {
+      lastCb = null;
+    }) as typeof cancelAnimationFrame;
+    performance.now = (() => fakeNow) as typeof performance.now;
+  });
+
+  afterEach(() => {
+    globalThis.requestAnimationFrame = savedRAF;
+    globalThis.cancelAnimationFrame = savedCAF;
+    performance.now = savedPerfNow;
+    vi.restoreAllMocks();
+  });
+
+  function stepFrame(t: number): void {
+    fakeNow = t;
+    const cb = lastCb;
+    lastCb = null;
+    if (cb) cb(t);
+  }
+
+  it("holds the last bbox briefly after tracks become empty, then drops it", () => {
+    const t0 = gibsonTrack({ bbox: [0.1, 0.1, 0.4, 0.4] });
+    const { rerender } = render(<HUD tracks={[t0]} videoRect={rect} />);
+    // First paint at t=0 — the box is drawn.
+    stepFrame(0);
+    const strokeRectsBefore = (
+      smoothCtx.ctx.strokeRect as unknown as ReturnType<typeof vi.fn>
+    ).mock.calls.length;
+    expect(strokeRectsBefore).toBeGreaterThan(0);
+
+    // Tracks vanish. Within the hold window the box must still be drawn.
+    rerender(<HUD tracks={[]} videoRect={rect} />);
+    stepFrame(100); // 100 ms after lastSeenAt (0) → still inside HOLD_MS (150).
+    const strokeRectsHold = (
+      smoothCtx.ctx.strokeRect as unknown as ReturnType<typeof vi.fn>
+    ).mock.calls.length;
+    expect(strokeRectsHold).toBeGreaterThan(strokeRectsBefore);
+
+    // Past the hold window the box must be pruned.
+    stepFrame(200); // 200 ms after lastSeenAt → outside HOLD_MS.
+    const strokeRectsAfter = (
+      smoothCtx.ctx.strokeRect as unknown as ReturnType<typeof vi.fn>
+    ).mock.calls.length;
+    // No new strokeRect calls between t=100 and t=200 — the box is gone.
+    expect(strokeRectsAfter).toBe(strokeRectsHold);
+  });
+
+  it("lerps the bbox between two consecutive detection updates", () => {
+    // Capture the (x, y, w, h) of the inner brand-color strokeRect — it is
+    // the second strokeRect call per draw (after the black halo). We track
+    // the LATEST call to inspect the smoothed bbox at any point.
+    const strokeRect = smoothCtx.ctx.strokeRect as unknown as ReturnType<
+      typeof vi.fn
+    >;
+
+    const start = gibsonTrack({ bbox: [0.1, 0.1, 0.2, 0.2] });
+    const { rerender } = render(<HUD tracks={[start]} videoRect={rect} />);
+    stepFrame(0);
+
+    // The first paint should be exactly at the start position (snap on
+    // first-seen). denormalizeBbox in a 1920x1080 → 960x540 letterbox-free
+    // case scales by 0.5: x1 = 0.1*960 = 96, y1 = 0.1*540 = 54.
+    const firstCall = strokeRect.mock.calls[strokeRect.mock.calls.length - 1];
+    expect(firstCall[0]).toBeCloseTo(96, 1);
+    expect(firstCall[1]).toBeCloseTo(54, 1);
+
+    // New detection event: bbox jumps to [0.5, 0.5, 0.6, 0.6]. After ONE
+    // lerp step toward the new target (LERP_RATE = 0.35), x1 should be
+    // 0.1 + 0.35 * (0.5 - 0.1) = 0.24, i.e. 0.24 * 960 = 230.4 — strictly
+    // between the start (96) and the target (480).
+    const next = gibsonTrack({ bbox: [0.5, 0.5, 0.6, 0.6] });
+    rerender(<HUD tracks={[next]} videoRect={rect} />);
+    stepFrame(16); // one ~60 Hz frame later.
+
+    const lerpedCall = strokeRect.mock.calls[strokeRect.mock.calls.length - 1];
+    const lerpedX = lerpedCall[0] as number;
+    const lerpedY = lerpedCall[1] as number;
+    expect(lerpedX).toBeGreaterThan(96);
+    expect(lerpedX).toBeLessThan(480);
+    expect(lerpedY).toBeGreaterThan(54);
+    expect(lerpedY).toBeLessThan(270);
+    // Sanity: the lerp step matches the configured LERP_RATE within float
+    // rounding. (Catches accidental swaps of source/target in the math.)
+    expect(lerpedX).toBeCloseTo(96 + 0.35 * (480 - 96), 1);
+  });
+});
