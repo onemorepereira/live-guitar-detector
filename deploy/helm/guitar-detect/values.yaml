@@ -79,3 +79,9 @@ models:
 # can flip them safely as Tasks 4.5-4.8 land.
 networkPolicies:
   enabled: true
+  # K3s ships Traefik in kube-system by default. Override if your cluster
+  # uses a different namespace (e.g. `traefik` for upstream-Traefik installs).
+  traefikNamespace: kube-system
+  # Pod label selector for the ingress controller.
+  traefikPodLabels:
+    app.kubernetes.io/name: traefik
