@@ -1,0 +1,80 @@
+# Troubleshooting
+
+## Common issues
+
+(From DESIGN.md §10.3 plus lessons learned during implementation.)
+
+| Symptom                          | Likely cause                                    | Fix                                                                                        |
+| -------------------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| Browser: no camera in picker     | Not on HTTPS or mkcert CA missing on device     | Install mkcert root CA on the device per [`deploy/k3s/README.md`](../deploy/k3s/README.md) |
+| Browser: WebRTC connection fails | Traefik not forwarding WS / UDP issues          | Check Traefik logs; confirm UDP not needed (aiortc TCP fallback)                           |
+| No detections appearing          | Worker can't reach Redis OR no frames flowing   | `kubectl logs` worker; check `XLEN frames:*` in redis                                      |
+| Wrong classifications            | CLIP prompts off OR detector cropping wrong     | Tweak `docs/prompts.md`; verify bbox padding in `classifier.py`                            |
+| Worker pod OOMKilled             | Model memory grew (multi-replica on same node?) | Increase limit OR reduce replicas                                                          |
+| High latency                     | Inference falling behind                        | Check `frames_dropped_total`; reduce `MAX_INGEST_FPS` or `DETECT_IMGSZ`                    |
+| Pod scheduled on wrong node      | Node labels missing or mismatched               | Re-run `label-nodes.sh`, `kubectl describe node`                                           |
+
+## Implementation-time gotchas
+
+These didn't make it into the original spec but cost cycles during the
+build.
+
+### Worker
+
+| Symptom                                                    | Cause                                        | Fix                                                                                         |
+| ---------------------------------------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `download_models.py` fails on `MobileCLIP-S0`              | S0 not in OpenCLIP registry                  | Script falls back to S1 automatically; see `services/inference-worker/scripts/README.md`    |
+| `model.track()` raises ImportError for `lap` at runtime    | Ultralytics autoinstalls `lap` on first call | Pinned `lap>=0.5.12,<1` in worker `pyproject.toml` as a worker dep                          |
+| Idempotent re-runs of `download_models.py` skip everything | Sentinel-based caching                       | Delete the relevant `precision.json` to force re-export of a single layer                   |
+| Worker test `requires_model` skips locally                 | Models not downloaded                        | `python scripts/download_models.py all --out app/models/`                                   |
+| Accuracy tests skip even with models present               | Synthetic fixture marker                     | `touch services/inference-worker/tests/fixtures/images/REAL.txt` after dropping real photos |
+
+### Gateway
+
+| Symptom                                          | Cause                                                         | Fix                                                                    |
+| ------------------------------------------------ | ------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| WS test occasionally hangs                       | TestClient + WebSocket lifecycle race                         | Use `asyncio.shield` in cleanup; see commit history                    |
+| aiortc dev image fails apt-get on `libavcodec59` | Debian bookworm package names                                 | Confirm base is `python:3.11-slim` (bookworm); names hold              |
+| Static-file mount path                           | gateway prod Dockerfile copies frontend dist to `/app/static` | If 404 on `/`, check `_STATIC_DIR.is_dir()` guard in `main.py`         |
+| Session "vanishes" mid-stream                    | 60s sliding TTL on `session:{id}` Hash                        | Ensure WebRTC is publishing frames (touches `last_frame_ts`) at 30 FPS |
+
+### Frontend
+
+| Symptom                                     | Cause                                              | Fix                                                                                |
+| ------------------------------------------- | -------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Camera not released after Stop              | `useCamera`'s cleanup only fires on full unmount   | Refresh the page or click Reset — proper fix is a Phase 5+ task                    |
+| HUD doesn't draw on initial render          | `denormalizeBbox` needs both video + element sizes | Confirm `ResizeObserver` fires; `VideoStage` guards `elW > 0`                      |
+| Rapid `select()` calls produce stale stream | Known race in `useCamera`                          | Avoid clicking the camera dropdown twice in <100ms; defensive fix is a future task |
+| `?debug=1` panel shows zeros                | First WS message hasn't arrived yet                | Wait ~1s after Start; the 2s sliding window populates                              |
+
+### Deployment / K3s
+
+| Symptom                                                    | Cause                                     | Fix                                                                        |
+| ---------------------------------------------------------- | ----------------------------------------- | -------------------------------------------------------------------------- |
+| Registry pod Pending                                       | Port 5000 in use OR Longhorn missing      | `ss -ltnp ':5000'` on the io-node; install Longhorn first                  |
+| NetworkPolicies silently no-op                             | K3s `--disable-network-policy` flag       | Re-enable network-policy controller or remove the flag                     |
+| Ingress 504 on `/ws`                                       | Traefik not handling WS                   | Confirm Traefik version ≥ 2.x; no extra annotation needed                  |
+| `helm install` hangs on namespace                          | Namespace was pre-created out of band     | Either `--set namespace.create=false` or delete the existing namespace     |
+| Image pull `x509: certificate signed by unknown authority` | K3s nodes don't trust the registry (HTTP) | Add `tls.insecure_skip_verify: true` to `/etc/rancher/k3s/registries.yaml` |
+
+## Where logs live
+
+- Gateway: `kubectl -n guitar-detect logs -l app.kubernetes.io/component=gateway`
+- Worker: `kubectl -n guitar-detect logs -l app.kubernetes.io/component=inference`
+- Redis: `kubectl -n guitar-detect logs <redis-pod-name>`
+- Traefik: `kubectl -n kube-system logs -l app.kubernetes.io/name=traefik`
+
+## Diagnostic CLI commands
+
+See [DEPLOYMENT.md → Operations runbook](DEPLOYMENT.md#operations-runbook)
+for the canonical kubectl snippets (frame backlog, force session cleanup,
+log streams).
+
+## Asking for help
+
+Open an issue with:
+
+- Phase you're in (dev compose, prod compose, K3s).
+- Output of the relevant log command above.
+- `helm get values guitar-detect -n guitar-detect` if K3s.
+- Browser console + network tab if frontend.
