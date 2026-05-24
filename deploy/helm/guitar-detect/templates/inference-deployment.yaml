@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "guitar-detect.fullname" . }}-inference
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    {{- include "guitar-detect.componentLabels" (dict "ctx" . "component" "inference") | nindent 4 }}
+spec:
+  replicas: {{ .Values.inference.replicas }}
+  selector:
+    matchLabels:
+      {{- include "guitar-detect.componentSelectorLabels" (dict "ctx" . "component" "inference") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "guitar-detect.componentSelectorLabels" (dict "ctx" . "component" "inference") | nindent 8 }}
+    spec:
+      {{- with .Values.inference.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: inference
+          image: "{{ .Values.image.registry }}/{{ .Values.inference.image }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: REDIS_URL
+              value: "redis://{{ include "guitar-detect.fullname" . }}-redis.{{ .Values.namespace.name }}.svc.cluster.local:6379/0"
+            {{- range $k, $v := .Values.inference.env }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+          readinessProbe:
+            # The worker `touch`es /tmp/ready once the pipeline is loaded
+            # (DESIGN.md §7.3; implemented in services/inference-worker/app/main.py).
+            # Exec probe avoids pulling FastAPI/aiohttp into the worker just for health.
+            exec:
+              command: ["cat", "/tmp/ready"]
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 6   # Allow ~30s of model loading after initial delay.
+          # No livenessProbe by design: a wedged inference worker is hard to
+          # detect generically (the readiness gate already covers cold start),
+          # and a buggy probe could cause restart loops. Add one in a
+          # follow-up if production telemetry justifies it.
+          resources:
+            # DESIGN.md §7.3 mandates Guaranteed QoS class for inference.
+            # We deliberately set limits == requests (taken from
+            # values.inference.resources.requests) rather than honoring
+            # values.inference.resources.limits, which is retained in
+            # values.yaml for visibility/documentation but intentionally
+            # ignored here. Override values.inference.resources.requests
+            # (in values.local.yaml) to retune both knobs in lockstep.
+            requests:
+              {{- toYaml .Values.inference.resources.requests | nindent 14 }}
+            limits:
+              {{- toYaml .Values.inference.resources.requests | nindent 14 }}
+      # No Service for inference: it is a pure Redis Streams consumer
+      # (DESIGN.md §7.3) — no inbound traffic, no port to expose.
