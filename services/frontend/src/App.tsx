@@ -8,6 +8,7 @@ import { VideoStage } from "./components/VideoStage";
 import { useCamera } from "./hooks/useCamera";
 import { useDetections } from "./hooks/useDetections";
 import { useGallery } from "./hooks/useGallery";
+import { useMetrics } from "./hooks/useMetrics";
 import { useWebRTC } from "./hooks/useWebRTC";
 
 type AppPhase = "idle" | "starting" | "running" | "error";
@@ -27,6 +28,7 @@ export function App(): JSX.Element {
     sessionId,
   );
   const gallery = useGallery();
+  const metrics = useMetrics(detections.event);
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
   // When detection events arrive, observe for gallery capture.
@@ -146,9 +148,9 @@ export function App(): JSX.Element {
       <DebugPanel
         wsState={detections.state}
         webrtcState={webrtc.state}
-        detectionFps={0}
-        videoFps={0}
-        lastFrameAgeMs={null}
+        detectionFps={metrics.detectionFps}
+        videoFps={metrics.videoFps}
+        lastFrameAgeMs={metrics.lastFrameAgeMs}
       />
     </main>
   );
