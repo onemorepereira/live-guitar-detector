@@ -3,7 +3,7 @@
 ## Local stack
 
 ```bash
-make dev                                # docker-compose: redis + gateway + worker
+make dev                                # redis + gateway + worker
 cd services/frontend && npm run dev     # vite at http://localhost:5173
 ```
 
@@ -11,9 +11,30 @@ Vite proxies `/api` and `/ws` to `localhost:8000` (gateway). The frontend
 runs on the host (not containerized) for the fastest iteration loop.
 
 The gateway and worker bind-mount their `app/` directories from the host;
-edits trigger uvicorn auto-reload (gateway) or require a `docker compose
-restart inference-worker` (worker is not hot-reloaded — model load is too
-slow to do per-edit).
+edits trigger uvicorn auto-reload (gateway) or require a `make dev-down &&
+make dev` cycle (worker is not hot-reloaded — model load is too slow to
+do per-edit).
+
+### Container runtime: docker or podman
+
+The Makefile auto-detects whichever is on `PATH` (preferring `docker`).
+Verify with `make runtime`:
+
+```bash
+$ make runtime
+CONTAINER = podman
+COMPOSE   = podman-compose
+```
+
+Force a specific runtime by overriding the variables:
+
+```bash
+make dev    CONTAINER=docker COMPOSE='docker compose'
+make build  CONTAINER=podman
+```
+
+On a host with neither installed, every target that touches images
+fails fast with an install pointer.
 
 ## Tests
 
