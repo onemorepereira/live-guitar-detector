@@ -36,5 +36,8 @@ build-images: ## Build all container images (override TAG=... for version, defau
 		--build-arg FRONTEND_IMAGE=guitar-detect/frontend-assets:$(TAG) \
 		-t guitar-detect/gateway:$(TAG)
 	docker build services/inference-worker -t guitar-detect/inference-worker:$(TAG)
-push-images:  ## Push images to local registry
-	@echo "TODO: push-images"
+push-images: ## Push container images to registry.local:5000 (override TAG=...)
+	docker tag guitar-detect/gateway:$(TAG)          registry.local:5000/guitar-detect/gateway:$(TAG)
+	docker tag guitar-detect/inference-worker:$(TAG) registry.local:5000/guitar-detect/inference-worker:$(TAG)
+	docker push registry.local:5000/guitar-detect/gateway:$(TAG)
+	docker push registry.local:5000/guitar-detect/inference-worker:$(TAG)
