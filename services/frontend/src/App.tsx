@@ -1,11 +1,13 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { createSession, deleteSession } from "./api/session";
 import { CameraPicker } from "./components/CameraPicker";
 import { DebugPanel } from "./components/DebugPanel";
+import { GalleryPanel } from "./components/GalleryPanel";
 import { VideoStage } from "./components/VideoStage";
 import { useCamera } from "./hooks/useCamera";
 import { useDetections } from "./hooks/useDetections";
+import { useGallery } from "./hooks/useGallery";
 import { useWebRTC } from "./hooks/useWebRTC";
 
 type AppPhase = "idle" | "starting" | "running" | "error";
@@ -15,12 +17,23 @@ export function App(): JSX.Element {
   const [phase, setPhase] = useState<AppPhase>("idle");
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [appError, setAppError] = useState<string | null>(null);
+  const [highlightedTrackId, setHighlightedTrackId] = useState<number | null>(
+    null,
+  );
 
   const detections = useDetections(phase === "running" ? sessionId : null);
   const webrtc = useWebRTC(
     phase === "running" ? camera.stream : null,
     sessionId,
   );
+  const gallery = useGallery();
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  // When detection events arrive, observe for gallery capture.
+  useEffect(() => {
+    if (!detections.event) return;
+    gallery.observe(detections.event.tracks, videoRef.current);
+  }, [detections.event, gallery]);
 
   const handleStart = useCallback(async () => {
     if (!camera.stream || !camera.selected) {
@@ -48,6 +61,8 @@ export function App(): JSX.Element {
     const sid = sessionId;
     setPhase("idle");
     setSessionId(null);
+    setHighlightedTrackId(null);
+    gallery.clear();
     if (sid) {
       try {
         await deleteSession(sid);
@@ -55,12 +70,18 @@ export function App(): JSX.Element {
         // Best-effort; the server has an idle-sweep that will clean up.
       }
     }
-  }, [sessionId]);
+  }, [sessionId, gallery]);
 
   const handleReset = useCallback(() => {
     setAppError(null);
     setPhase("idle");
     setSessionId(null);
+    setHighlightedTrackId(null);
+    gallery.clear();
+  }, [gallery]);
+
+  const handleVideoReady = useCallback((el: HTMLVideoElement | null) => {
+    videoRef.current = el;
   }, []);
 
   return (
@@ -82,10 +103,21 @@ export function App(): JSX.Element {
 
       {phase === "running" && (
         <>
-          <VideoStage
-            stream={camera.stream}
-            tracks={detections.event?.tracks ?? []}
-          />
+          <div className="flex flex-col md:flex-row gap-4 w-full max-w-6xl">
+            <div className="flex-1">
+              <VideoStage
+                stream={camera.stream}
+                tracks={detections.event?.tracks ?? []}
+                highlightedTrackId={highlightedTrackId}
+                onVideoReady={handleVideoReady}
+              />
+            </div>
+            <GalleryPanel
+              items={gallery.items}
+              highlightedTrackId={highlightedTrackId}
+              onSelect={setHighlightedTrackId}
+            />
+          </div>
           <button
             type="button"
             onClick={handleStop}

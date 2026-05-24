@@ -27,6 +27,7 @@ export interface VideoRect {
 export interface HUDProps {
   tracks: TrackDetection[];
   videoRect: VideoRect;
+  highlightedTrackId?: number | null;
 }
 
 /**
@@ -42,6 +43,8 @@ const BRAND_COLOR: Record<string, string> = {
 const LABEL_FONT = "bold 14px system-ui, sans-serif";
 const ANALYZING_FONT = "italic 14px system-ui, sans-serif";
 const STROKE_WIDTH = 3;
+const HIGHLIGHT_STROKE_WIDTH = 5;
+const HIGHLIGHT_SHADOW_BLUR = 18;
 const LABEL_TEXT_HEIGHT = 16; // ~14px font + 2px ascender padding
 const LABEL_PADDING = 4;
 /**
@@ -57,7 +60,11 @@ const TOP_EDGE_THRESHOLD = 30;
 const ALPHA_INITIAL = 0.3;
 const ALPHA_STEP = 0.175;
 
-export function HUD({ tracks, videoRect }: HUDProps): JSX.Element {
+export function HUD({
+  tracks,
+  videoRect,
+  highlightedTrackId = null,
+}: HUDProps): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -70,7 +77,7 @@ export function HUD({ tracks, videoRect }: HUDProps): JSX.Element {
     const draw = () => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       for (const t of tracks) {
-        drawTrack(ctx, t, videoRect);
+        drawTrack(ctx, t, videoRect, t.track_id === highlightedTrackId);
       }
       rafId = requestAnimationFrame(draw);
     };
@@ -78,7 +85,7 @@ export function HUD({ tracks, videoRect }: HUDProps): JSX.Element {
     return () => {
       cancelAnimationFrame(rafId);
     };
-  }, [tracks, videoRect]);
+  }, [tracks, videoRect, highlightedTrackId]);
 
   return (
     <canvas
@@ -94,10 +101,12 @@ function drawTrack(
   ctx: CanvasRenderingContext2D,
   t: TrackDetection,
   rect: VideoRect,
+  highlighted: boolean,
 ): void {
   const [x1, y1, x2, y2] = denormalizeBbox(t.bbox, rect);
   const brand = t.label?.brand ?? "Unknown";
   const color = BRAND_COLOR[brand] ?? BRAND_COLOR.Unknown;
+  const strokeWidth = highlighted ? HIGHLIGHT_STROKE_WIDTH : STROKE_WIDTH;
 
   // Opacity ramp 0.3 → 1.0 over ages 1..5; clamp at 1.0.
   const alpha = Math.min(
@@ -109,10 +118,14 @@ function drawTrack(
   ctx.globalAlpha = alpha;
   // Black contrast halo first; brand color on top.
   ctx.strokeStyle = "#000000";
-  ctx.lineWidth = STROKE_WIDTH + 2;
+  ctx.lineWidth = strokeWidth + 2;
   ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+  if (highlighted) {
+    ctx.shadowColor = color;
+    ctx.shadowBlur = HIGHLIGHT_SHADOW_BLUR;
+  }
   ctx.strokeStyle = color;
-  ctx.lineWidth = STROKE_WIDTH;
+  ctx.lineWidth = strokeWidth;
   ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
 
   // Label text + font selection.

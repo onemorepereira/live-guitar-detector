@@ -174,4 +174,24 @@ describe("HUD", () => {
     const { container } = render(<HUD tracks={[]} videoRect={rect} />);
     expect(container.querySelector("canvas")).toBeTruthy();
   });
+
+  it("draws a thicker stroke and a shadow for the highlighted track", () => {
+    render(
+      <HUD tracks={[gibsonTrack()]} videoRect={rect} highlightedTrackId={1} />,
+    );
+    const lineWidths = stubCtx.calls
+      .filter((c) => c.prop === "lineWidth")
+      .map((c) => c.value as number);
+    // The inner brand-color stroke should use the highlighted width (5)
+    // rather than the default (3).
+    expect(lineWidths).toContain(5);
+    const shadowColors = stubCtx.calls
+      .filter((c) => c.prop === "shadowColor")
+      .map((c) => c.value as string);
+    expect(shadowColors).toContain("#C8A45C");
+    const shadowBlurs = stubCtx.calls
+      .filter((c) => c.prop === "shadowBlur")
+      .map((c) => c.value as number);
+    expect(shadowBlurs.some((b) => b > 0)).toBe(true);
+  });
 });

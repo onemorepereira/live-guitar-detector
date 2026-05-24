@@ -6,6 +6,14 @@ import type { TrackDetection } from "../types/detection";
 export interface VideoStageProps {
   stream: MediaStream | null;
   tracks: TrackDetection[];
+  highlightedTrackId?: number | null;
+  /**
+   * Notifies the parent of the underlying `<video>` element when mounted
+   * (and `null` on unmount), so parent-owned features like the gallery
+   * thumbnail capture can read from the live frame without lifting the
+   * element up.
+   */
+  onVideoReady?: (el: HTMLVideoElement | null) => void;
 }
 
 /**
@@ -13,7 +21,12 @@ export interface VideoStageProps {
  * canvas HUD. Element dimensions are tracked via ResizeObserver so the
  * HUD's denormalizeBbox math has accurate elW/elH at all times.
  */
-export function VideoStage({ stream, tracks }: VideoStageProps): JSX.Element {
+export function VideoStage({
+  stream,
+  tracks,
+  highlightedTrackId = null,
+  onVideoReady,
+}: VideoStageProps): JSX.Element {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [videoSize, setVideoSize] = useState({ videoW: 1280, videoH: 720 });
@@ -32,6 +45,13 @@ export function VideoStage({ stream, tracks }: VideoStageProps): JSX.Element {
       v.srcObject = null;
     }
   }, [stream]);
+
+  // Notify parent of the video element (for gallery thumbnail capture etc.).
+  useEffect(() => {
+    if (!onVideoReady) return;
+    onVideoReady(videoRef.current);
+    return () => onVideoReady(null);
+  }, [onVideoReady]);
 
   // Track intrinsic video size
   useEffect(() => {
@@ -72,7 +92,11 @@ export function VideoStage({ stream, tracks }: VideoStageProps): JSX.Element {
         className="absolute inset-0 w-full h-full object-contain"
       />
       {elementSize.elW > 0 && (
-        <HUD tracks={tracks} videoRect={{ ...videoSize, ...elementSize }} />
+        <HUD
+          tracks={tracks}
+          videoRect={{ ...videoSize, ...elementSize }}
+          highlightedTrackId={highlightedTrackId}
+        />
       )}
     </div>
   );
