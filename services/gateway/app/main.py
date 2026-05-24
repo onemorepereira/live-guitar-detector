@@ -74,6 +74,7 @@ async def lifespan(app: FastAPI):
         r=app.state.redis,
         settings=settings,
         on_close=app.state.session_manager.delete,
+        on_frame=app.state.session_manager.touch,
     )
 
     async def _idle_sweep_loop() -> None:

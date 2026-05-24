@@ -81,10 +81,14 @@ class WebRTCManager:
         r: redis_async.Redis,
         settings: Settings,
         on_close: Callable[[str], Awaitable[None]],
+        on_frame: Callable[[str], Awaitable[None]] | None = None,
     ) -> None:
         self._r = r
         self._settings = settings
         self._on_close = on_close
+        # Called once per accepted frame so the caller can refresh the
+        # session's idle timer. Typically wired to SessionManager.touch.
+        self._on_frame = on_frame
         self._peers: dict[str, _PeerEntry] = {}
         # Strong refs to "fire and forget" tasks (audio blackhole start,
         # teardown coroutines scheduled from state callbacks). Without
@@ -108,8 +112,15 @@ class WebRTCManager:
         entry = _PeerEntry(peer=peer)
         self._peers[session_id] = entry
 
+        # Explicitly declare a recvonly video transceiver BEFORE
+        # setRemoteDescription. Without this, aiortc's auto-negotiation
+        # from the client's offer is unreliable across versions — the
+        # transceiver may end up inactive and `on_track` never fires.
+        peer.addTransceiver("video", direction="recvonly")
+
         @peer.on("track")
         def on_track(track) -> None:
+            logger.info("session={} on_track kind={}", session_id, track.kind)
             if track.kind != "video":
                 # We don't currently use audio; sink it to /dev/null so the
                 # remote isn't backpressured by buffered packets we never
@@ -195,6 +206,7 @@ class WebRTCManager:
         min_interval_ms = int(1000 / max(1, self._settings.MAX_INGEST_FPS))
         jpeg_quality = int(self._settings.JPEG_QUALITY)
 
+        logger.info("session={} _consume_video started", session_id)
         try:
             while True:
                 frame = await track.recv()
@@ -202,6 +214,13 @@ class WebRTCManager:
                 if _should_drop(entry, now_ms, min_interval_ms):
                     continue
                 entry.last_publish_ms = now_ms
+                if entry.frame_counter == 0:
+                    logger.info(
+                        "session={} first frame received {}x{}",
+                        session_id,
+                        frame.width,
+                        frame.height,
+                    )
 
                 # av.VideoFrame → numpy BGR. ``to_ndarray(format="bgr24")``
                 # returns a contiguous H x W x 3 uint8 array suitable for
@@ -227,6 +246,11 @@ class WebRTCManager:
                     width=width,
                     height=height,
                 )
+                if self._on_frame is not None:
+                    try:
+                        await self._on_frame(session_id)
+                    except Exception as exc:
+                        logger.warning("on_frame raised for session={}: {}", session_id, exc)
         except asyncio.CancelledError:
             raise
         except Exception as exc:

@@ -165,6 +165,16 @@ async def consume_session(
     key = _frames_key(session_id)
     await _ensure_group(r, session_id)
 
+    # Periodic stats: every STATS_INTERVAL_S, log a one-line summary so an
+    # operator can answer "is the worker doing anything for this session?"
+    # without grepping per-frame logs.
+    import time as _time
+
+    stats_interval_s = 5.0
+    last_stats_at = _time.monotonic()
+    consumed = 0
+    tracks_total = 0
+
     while not stop_event.is_set():
         try:
             resp = await r.xreadgroup(
@@ -202,6 +212,8 @@ async def consume_session(
                     )
                     await _publish_detection_event(r, session_id=session_id, event=event)
                     await r.xack(key, CONSUMER_GROUP, entry_id)
+                    consumed += 1
+                    tracks_total += len(event.get("tracks", []))
                 except Exception as exc:
                     # Intentionally do NOT ack. The PEL is the operator's
                     # signal that something is wrong — silent drops would hide
@@ -212,6 +224,28 @@ async def consume_session(
                         entry_id,
                         exc,
                     )
+
+        # Periodic stats outside the for-loop so we still log during quiet
+        # periods (BLOCK timeouts). Includes pipeline-level counters
+        # (raw YOLO detections + unconfirmed-track skips) so an operator
+        # can localize "no tracks" to either "YOLO sees nothing" or
+        # "ByteTrack is rejecting confirmations."
+        now_mono = _time.monotonic()
+        if now_mono - last_stats_at >= stats_interval_s:
+            logger.info(
+                "session={} stats: consumed={} raw_dets={} unconfirmed_skips={} tracks_emitted={} over {:.0f}s",
+                session_id,
+                consumed,
+                pipeline.raw_detections_total,
+                pipeline.unconfirmed_skips,
+                tracks_total,
+                now_mono - last_stats_at,
+            )
+            last_stats_at = now_mono
+            consumed = 0
+            tracks_total = 0
+            pipeline.raw_detections_total = 0
+            pipeline.unconfirmed_skips = 0
 
 
 class Consumer:

@@ -159,6 +159,9 @@ class Pipeline:
         # confirmation threshold too high, etc.) and the pipeline is silently
         # discarding every box. Read by scripts/benchmark.py.
         self.unconfirmed_skips: int = 0
+        # Total YOLO detections (any track_id, including None) — useful for
+        # distinguishing "YOLO sees nothing" from "ByteTrack rejected everything".
+        self.raw_detections_total: int = 0
 
     def process_frame(
         self,
@@ -190,6 +193,7 @@ class Pipeline:
         frame_area = float(width * height)
 
         detections: list[Detection] = self._detector.detect_and_track(frame)
+        self.raw_detections_total += len(detections)
         tracks_out: list[TrackDetectionDict] = []
 
         for det in detections:
