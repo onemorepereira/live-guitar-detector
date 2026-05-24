@@ -27,6 +27,7 @@ test today and a Redis-driven worker loop later.
 from __future__ import annotations
 
 import time
+from collections import Counter
 from typing import TypedDict
 
 import numpy as np
@@ -162,6 +163,11 @@ class Pipeline:
         # Total YOLO detections (any track_id, including None) — useful for
         # distinguishing "YOLO sees nothing" from "ByteTrack rejected everything".
         self.raw_detections_total: int = 0
+        # Per-(brand, model) tally of raw classifier outputs since the last
+        # reset. Lets an operator distinguish "CLIP returns Unknown for every
+        # crop" from "CLIP labels but vote can't converge" — the former means
+        # the rejection prompts are winning, the latter means flapping.
+        self.classifier_label_counts: Counter[tuple[str, str]] = Counter()
 
     def process_frame(
         self,
@@ -233,6 +239,7 @@ class Pipeline:
             ):
                 crop = _crop(frame, det.bbox_xyxy)
                 raw = self._classifier.classify(crop)
+                self.classifier_label_counts[(raw["brand"], raw["model"])] += 1
                 vote.update(raw)
                 # Refresh after the update so the emitted label reflects this
                 # frame's contribution instead of the previous snapshot.

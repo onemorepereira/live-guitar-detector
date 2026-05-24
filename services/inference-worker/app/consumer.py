@@ -232,13 +232,24 @@ async def consume_session(
         # "ByteTrack is rejecting confirmations."
         now_mono = _time.monotonic()
         if now_mono - last_stats_at >= stats_interval_s:
+            # Compact "Brand Model:count" breakdown sorted by frequency,
+            # most-common first. Reads naturally when Unknown dominates.
+            label_breakdown = (
+                ", ".join(
+                    f"{brand} {model}={cnt}"
+                    for (brand, model), cnt in pipeline.classifier_label_counts.most_common()
+                )
+                or "(no classifications)"
+            )
             logger.info(
-                "session={} stats: consumed={} raw_dets={} unconfirmed_skips={} tracks_emitted={} over {:.0f}s",
+                "session={} stats: consumed={} raw_dets={} unconfirmed_skips={} "
+                "tracks_emitted={} classifier=[{}] over {:.0f}s",
                 session_id,
                 consumed,
                 pipeline.raw_detections_total,
                 pipeline.unconfirmed_skips,
                 tracks_total,
+                label_breakdown,
                 now_mono - last_stats_at,
             )
             last_stats_at = now_mono
@@ -246,6 +257,7 @@ async def consume_session(
             tracks_total = 0
             pipeline.raw_detections_total = 0
             pipeline.unconfirmed_skips = 0
+            pipeline.classifier_label_counts.clear()
 
 
 class Consumer:

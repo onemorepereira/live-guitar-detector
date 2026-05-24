@@ -10,6 +10,7 @@ same name when `env_prefix=""`.
 """
 
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -31,6 +32,10 @@ class Settings(BaseSettings):
 
     # MobileCLIP classifier
     CLIP_INPUT_SIZE: int = Field(224, ge=1)
+    # `zero_shot` uses the prompts.md text features; `probe` uses a
+    # linear head trained offline via scripts/train_probe.py.
+    CLASSIFIER_MODE: Literal["zero_shot", "probe"] = "zero_shot"
+    PROBE_PATH: Path = Path("/models/classifier-probe/probe.npz")
 
     # Rolling-window voting
     VOTE_WINDOW: int = Field(15, ge=1)

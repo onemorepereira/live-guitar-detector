@@ -86,6 +86,23 @@ def _resolve_models_dir(settings: Settings) -> Path | None:
     return None
 
 
+def _resolve_probe_path(settings: Settings, models_dir: Path) -> Path | None:
+    """Return a usable trained-probe path or ``None`` if neither exists.
+
+    Same container-first / local-fallback shape as the other resolvers.
+    ``models_dir`` is the already-resolved active models directory so we
+    don't reach into ``settings.MODELS_DIR`` for the fallback (which may
+    be ``/models`` and unavailable outside the container).
+    """
+    configured = settings.PROBE_PATH
+    if configured.is_file():
+        return configured
+    local = models_dir / "classifier-probe" / "probe.npz"
+    if local.is_file():
+        return local
+    return None
+
+
 async def _run_consumer(settings: Settings) -> int:
     """Construct pipeline + Redis client and run the consumer supervisor.
 
@@ -104,14 +121,18 @@ async def _run_consumer(settings: Settings) -> int:
     from app.pipeline import Pipeline
     from app.prompts import load_prompts
 
-    prompts_path = _resolve_prompts_path(settings)
-    if prompts_path is None:
-        print(
-            f"prompts file not found (checked {settings.PROMPTS_FILE} and "
-            "<repo>/docs/prompts.md); set PROMPTS_FILE or run from a repo checkout.",
-            file=sys.stderr,
-        )
-        return 1
+    # Only the zero-shot classifier needs prompts.md; probe mode embeds
+    # its label space in the trained `.npz` artifact itself.
+    prompts_path: Path | None = None
+    if settings.CLASSIFIER_MODE == "zero_shot":
+        prompts_path = _resolve_prompts_path(settings)
+        if prompts_path is None:
+            print(
+                f"prompts file not found (checked {settings.PROMPTS_FILE} and "
+                "<repo>/docs/prompts.md); set PROMPTS_FILE or run from a repo checkout.",
+                file=sys.stderr,
+            )
+            return 1
 
     models_dir = _resolve_models_dir(settings)
     if models_dir is None:
@@ -122,9 +143,6 @@ async def _run_consumer(settings: Settings) -> int:
         )
         return 1
 
-    print(f"loading prompts from {prompts_path}", flush=True)
-    prompts = load_prompts(prompts_path)
-
     print(f"loading models from {models_dir}", flush=True)
     detector = Detector(
         models_dir / "yolov8n-oiv7-fp32",
@@ -132,7 +150,26 @@ async def _run_consumer(settings: Settings) -> int:
         iou=settings.DETECT_IOU,
         imgsz=settings.DETECT_IMGSZ,
     )
-    classifier = Classifier(models_dir, prompts, input_size=settings.CLIP_INPUT_SIZE)
+
+    if settings.CLASSIFIER_MODE == "probe":
+        from app.probe_classifier import ProbeClassifier
+
+        probe_path = _resolve_probe_path(settings, models_dir)
+        if probe_path is None:
+            print(
+                f"probe head not found at {settings.PROBE_PATH} "
+                f"(or under {models_dir}/classifier-probe/); train one with "
+                "scripts/train_probe.py or set CLASSIFIER_MODE=zero_shot.",
+                file=sys.stderr,
+            )
+            return 1
+        print(f"loading probe head from {probe_path}", flush=True)
+        classifier = ProbeClassifier(models_dir, probe_path, input_size=settings.CLIP_INPUT_SIZE)
+    else:
+        print(f"loading prompts from {prompts_path}", flush=True)
+        prompts = load_prompts(prompts_path)
+        classifier = Classifier(models_dir, prompts, input_size=settings.CLIP_INPUT_SIZE)
+
     pipeline = Pipeline(detector, classifier, settings)
 
     # ``decode_responses=False`` is mandatory: the frames stream carries raw

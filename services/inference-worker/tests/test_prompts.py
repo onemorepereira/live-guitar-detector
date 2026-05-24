@@ -23,11 +23,14 @@ TARGET_PAIRS = {
 }
 
 
-def test_load_design_prompts_returns_nine_entries():
+def test_load_design_prompts_returns_eight_entries():
     prompts = load_prompts(DESIGN_PROMPTS_MD)
     # Regression guard against accidental prompt deletion.
     # When adding a new target, bump this assertion deliberately.
-    assert len(prompts) == 9
+    # NOTE: was 9 — dropped to 8 after removing the "different electric
+    # guitar" rejection prompt (manual testing showed it dominated real
+    # target crops and prevented vote convergence).
+    assert len(prompts) == 8
     assert all(isinstance(p, Prompt) for p in prompts)
 
 
@@ -39,10 +42,11 @@ def test_design_prompts_cover_six_target_models():
     assert non_unknown == TARGET_PAIRS
 
 
-def test_design_prompts_have_three_unknown_rejection_entries():
+def test_design_prompts_have_two_unknown_rejection_entries():
     prompts = load_prompts(DESIGN_PROMPTS_MD)
     unknowns = [p for p in prompts if p.brand == "Unknown" and p.model == "Unknown"]
-    assert len(unknowns) == 3
+    # Was 3; dropped to 2 (acoustic + bass) — see prompts.md comment.
+    assert len(unknowns) == 2
 
 
 def test_load_minimal_yaml_fixture():

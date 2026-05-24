@@ -41,7 +41,8 @@ prompts:
   - text: "a photograph of a bass guitar"
     brand: Unknown
     model: Unknown
-  - text: "a photograph of a different electric guitar"
-    brand: Unknown
-    model: Unknown
+  # NOTE: removed "a photograph of a different electric guitar" rejection
+  # prompt — manual testing showed it dominated real-target crops (~75% of
+  # classifier outputs) and prevented vote convergence. Acoustic + bass are
+  # sufficient rejection coverage for the typical use case.
 ```

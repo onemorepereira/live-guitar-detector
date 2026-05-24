@@ -180,46 +180,52 @@ class Classifier:
         return stacked / np.clip(norms, 1e-12, None)
 
     def _preprocess(self, image_bgr: np.ndarray) -> np.ndarray:
-        """BGR uint8 HxWx3 -> (1, 3, input_size, input_size) float32 CHW.
+        """Instance shim around :func:`preprocess_for_clip`."""
+        return preprocess_for_clip(image_bgr, self._input_size)
 
-        We square-pad with edge replication before resizing so that aspect
-        ratio is preserved without injecting black bars (which CLIP can
-        latch onto as a "studio" cue). Edge replication is cheap, looks
-        natural on guitar crops, and matches the convention used by several
-        published MobileCLIP demos.
-        """
-        if image_bgr.ndim != 3 or image_bgr.shape[2] != 3:
-            raise ValueError(f"classifier expects HxWx3 BGR image, got shape {image_bgr.shape}")
-        if image_bgr.dtype != np.uint8:
-            # A float32 image already in [0, 1] would silently round-trip into
-            # the [0, 1/255] range after the /255 step below and produce
-            # garbage features. Reject upfront.
-            raise ValueError(f"classifier expects uint8 image, got dtype {image_bgr.dtype}")
 
-        rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
+def preprocess_for_clip(image_bgr: np.ndarray, input_size: int) -> np.ndarray:
+    """BGR uint8 HxWx3 -> (1, 3, input_size, input_size) float32 CHW.
 
-        h, w = rgb.shape[:2]
-        if h != w:
-            target = max(h, w)
-            top = (target - h) // 2
-            bottom = target - h - top
-            left = (target - w) // 2
-            right = target - w - left
-            rgb = cv2.copyMakeBorder(rgb, top, bottom, left, right, cv2.BORDER_REPLICATE)
+    Square-pads with edge replication before resizing so aspect ratio is
+    preserved without injecting black bars (CLIP can latch onto those as
+    a "studio" cue). Shared between :class:`Classifier` (zero-shot text
+    matching) and :class:`ProbeClassifier` (linear head over the same
+    image embeddings) so the train- and inference-time preprocessing are
+    byte-identical.
+    """
+    if image_bgr.ndim != 3 or image_bgr.shape[2] != 3:
+        raise ValueError(f"classifier expects HxWx3 BGR image, got shape {image_bgr.shape}")
+    if image_bgr.dtype != np.uint8:
+        # A float32 image already in [0, 1] would silently round-trip into
+        # the [0, 1/255] range after the /255 step below and produce
+        # garbage features. Reject upfront.
+        raise ValueError(f"classifier expects uint8 image, got dtype {image_bgr.dtype}")
 
-        # INTER_AREA is the right downsampler when shrinking, INTER_CUBIC the
-        # right upsampler when enlarging — OpenCV docs are explicit on this
-        # and conflating them costs visible quality on small crops.
-        interp = cv2.INTER_AREA if rgb.shape[0] >= self._input_size else cv2.INTER_CUBIC
-        resized = cv2.resize(rgb, (self._input_size, self._input_size), interpolation=interp)
+    rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
 
-        arr = resized.astype(np.float32) / 255.0
-        mean = np.array(OPENAI_CLIP_MEAN, dtype=np.float32)
-        std = np.array(OPENAI_CLIP_STD, dtype=np.float32)
-        arr = (arr - mean) / std
+    h, w = rgb.shape[:2]
+    if h != w:
+        target = max(h, w)
+        top = (target - h) // 2
+        bottom = target - h - top
+        left = (target - w) // 2
+        right = target - w - left
+        rgb = cv2.copyMakeBorder(rgb, top, bottom, left, right, cv2.BORDER_REPLICATE)
 
-        # HWC -> CHW, add batch dim. ``np.ascontiguousarray`` makes the
-        # buffer C-contiguous after transpose so OpenVINO doesn't have to
-        # copy internally.
-        chw = np.ascontiguousarray(arr.transpose(2, 0, 1))
-        return chw[np.newaxis, ...]
+    # INTER_AREA is the right downsampler when shrinking, INTER_CUBIC the
+    # right upsampler when enlarging — OpenCV docs are explicit on this
+    # and conflating them costs visible quality on small crops.
+    interp = cv2.INTER_AREA if rgb.shape[0] >= input_size else cv2.INTER_CUBIC
+    resized = cv2.resize(rgb, (input_size, input_size), interpolation=interp)
+
+    arr = resized.astype(np.float32) / 255.0
+    mean = np.array(OPENAI_CLIP_MEAN, dtype=np.float32)
+    std = np.array(OPENAI_CLIP_STD, dtype=np.float32)
+    arr = (arr - mean) / std
+
+    # HWC -> CHW, add batch dim. ``np.ascontiguousarray`` makes the
+    # buffer C-contiguous after transpose so OpenVINO doesn't have to
+    # copy internally.
+    chw = np.ascontiguousarray(arr.transpose(2, 0, 1))
+    return chw[np.newaxis, ...]
