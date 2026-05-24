@@ -103,6 +103,17 @@ def _resolve_probe_path(settings: Settings, models_dir: Path) -> Path | None:
     return None
 
 
+def _resolve_siglip_probe_path(settings: Settings, models_dir: Path) -> Path | None:
+    """Sibling of :func:`_resolve_probe_path` for the SigLIP probe artifact."""
+    configured = settings.SIGLIP_PROBE_PATH
+    if configured.is_file():
+        return configured
+    local = models_dir / "classifier-probe" / "probe_siglip.npz"
+    if local.is_file():
+        return local
+    return None
+
+
 async def _run_consumer(settings: Settings) -> int:
     """Construct pipeline + Redis client and run the consumer supervisor.
 
@@ -121,8 +132,8 @@ async def _run_consumer(settings: Settings) -> int:
     from app.pipeline import Pipeline
     from app.prompts import load_prompts
 
-    # Only the zero-shot classifier needs prompts.md; probe mode embeds
-    # its label space in the trained `.npz` artifact itself.
+    # Only the zero-shot classifier needs prompts.md; probe modes embed
+    # their label space in the trained `.npz` artifact itself.
     prompts_path: Path | None = None
     if settings.CLASSIFIER_MODE == "zero_shot":
         prompts_path = _resolve_prompts_path(settings)
@@ -165,6 +176,24 @@ async def _run_consumer(settings: Settings) -> int:
             return 1
         print(f"loading probe head from {probe_path}", flush=True)
         classifier = ProbeClassifier(models_dir, probe_path, input_size=settings.CLIP_INPUT_SIZE)
+    elif settings.CLASSIFIER_MODE == "siglip_probe":
+        from app.siglip_probe_classifier import SigLIPProbeClassifier
+
+        siglip_probe_path = _resolve_siglip_probe_path(settings, models_dir)
+        if siglip_probe_path is None:
+            print(
+                f"siglip probe head not found at {settings.SIGLIP_PROBE_PATH} "
+                f"(or under {models_dir}/classifier-probe/); train one with "
+                "scripts/train_probe.py --backend siglip.",
+                file=sys.stderr,
+            )
+            return 1
+        print(
+            f"loading SigLIP probe head from {siglip_probe_path}"
+            f" (encoder: {settings.SIGLIP_MODEL_ID})",
+            flush=True,
+        )
+        classifier = SigLIPProbeClassifier(siglip_probe_path, model_id=settings.SIGLIP_MODEL_ID)
     else:
         print(f"loading prompts from {prompts_path}", flush=True)
         prompts = load_prompts(prompts_path)

@@ -3,7 +3,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createSession, deleteSession } from "./api/session";
 import { CameraPicker } from "./components/CameraPicker";
 import { DebugPanel } from "./components/DebugPanel";
-import { GalleryPanel } from "./components/GalleryPanel";
 import { VideoStage } from "./components/VideoStage";
 import { useCamera } from "./hooks/useCamera";
 import { useDetections } from "./hooks/useDetections";
@@ -105,28 +104,25 @@ export function App(): JSX.Element {
 
       {phase === "running" && (
         <>
-          <div className="flex flex-col md:flex-row gap-4 w-full max-w-6xl">
-            <div className="flex-1">
-              <VideoStage
-                stream={camera.stream}
-                tracks={detections.event?.tracks ?? []}
-                highlightedTrackId={highlightedTrackId}
-                onVideoReady={handleVideoReady}
-              />
-            </div>
-            <GalleryPanel
-              items={gallery.items}
-              highlightedTrackId={highlightedTrackId}
-              onSelect={setHighlightedTrackId}
-            />
-          </div>
+          <VideoStage
+            stream={camera.stream}
+            tracks={detections.event?.tracks ?? []}
+            highlightedTrackId={highlightedTrackId}
+            onVideoReady={handleVideoReady}
+            fullscreen
+          />
+          {/* Stop button floats over the fullscreen video at the bottom
+              edge — `z-20` keeps it above the stage (z-10) and the HUD. */}
           <button
             type="button"
             onClick={handleStop}
-            className="rounded bg-zinc-700 hover:bg-zinc-600 px-4 py-2 text-zinc-100"
+            className="fixed bottom-6 left-1/2 -translate-x-1/2 z-20 rounded-full bg-zinc-900/80 hover:bg-zinc-800 px-6 py-3 text-zinc-100 font-medium shadow-lg backdrop-blur-sm"
           >
             Stop
           </button>
+          {/* Gallery state is still maintained; the panel is intentionally
+              hidden in fullscreen mode. Adding a slide-out drawer is a
+              follow-up if it's missed. */}
         </>
       )}
 

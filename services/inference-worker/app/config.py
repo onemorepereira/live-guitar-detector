@@ -32,10 +32,15 @@ class Settings(BaseSettings):
 
     # MobileCLIP classifier
     CLIP_INPUT_SIZE: int = Field(224, ge=1)
-    # `zero_shot` uses the prompts.md text features; `probe` uses a
-    # linear head trained offline via scripts/train_probe.py.
-    CLASSIFIER_MODE: Literal["zero_shot", "probe"] = "zero_shot"
+    # `zero_shot`    — MobileCLIP image features vs prompts.md text features
+    # `probe`        — linear head over MobileCLIP image features
+    # `siglip_probe` — linear head over google/siglip2-base-patch16-256
+    #                  image features (better fine-grained discrimination
+    #                  per docs/BENCHMARKS.md probe-comparison entry)
+    CLASSIFIER_MODE: Literal["zero_shot", "probe", "siglip_probe"] = "zero_shot"
     PROBE_PATH: Path = Path("/models/classifier-probe/probe.npz")
+    SIGLIP_PROBE_PATH: Path = Path("/models/classifier-probe/probe_siglip.npz")
+    SIGLIP_MODEL_ID: str = "google/siglip2-base-patch16-256"
 
     # Rolling-window voting
     VOTE_WINDOW: int = Field(15, ge=1)

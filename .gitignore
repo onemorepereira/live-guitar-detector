@@ -54,3 +54,11 @@ services/inference-worker/tests/fixtures/images/REAL.txt
 # Local data
 data/
 fixtures/local/
+
+# One-off local data-prep scripts (underscore-prefixed in services/*/scripts/)
+services/inference-worker/scripts/_pull_reverb_dataset.py
+services/inference-worker/scripts/_crop_dataset.py
+
+# Probe training: YOLO-cropped Reverb images
+data_crops/
+services/inference-worker/scripts/_train_probe_siglip.py

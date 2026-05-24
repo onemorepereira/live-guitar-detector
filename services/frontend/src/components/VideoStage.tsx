@@ -14,6 +14,12 @@ export interface VideoStageProps {
    * element up.
    */
   onVideoReady?: (el: HTMLVideoElement | null) => void;
+  /**
+   * When true, the stage takes over the full viewport (good for phone
+   * playback). When false (default), it sits inline at `aspect-video`
+   * with a max width.
+   */
+  fullscreen?: boolean;
 }
 
 /**
@@ -26,6 +32,7 @@ export function VideoStage({
   tracks,
   highlightedTrackId = null,
   onVideoReady,
+  fullscreen = false,
 }: VideoStageProps): JSX.Element {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -79,11 +86,12 @@ export function VideoStage({
     return () => obs.disconnect();
   }, []);
 
+  const containerClass = fullscreen
+    ? "fixed inset-0 z-10 bg-black overflow-hidden"
+    : "relative w-full max-w-5xl aspect-video bg-black rounded overflow-hidden";
+
   return (
-    <div
-      ref={containerRef}
-      className="relative w-full max-w-5xl aspect-video bg-black rounded overflow-hidden"
-    >
+    <div ref={containerRef} className={containerClass}>
       <video
         ref={videoRef}
         autoPlay

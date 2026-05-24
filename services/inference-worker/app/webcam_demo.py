@@ -169,8 +169,8 @@ def run_webcam(cam_index: int, settings: Settings) -> int:
     standalone ``scripts/webcam_demo.py`` shim — both pass a fresh
     :class:`Settings` so env-var overrides still work.
     """
-    # Only the zero-shot classifier needs prompts.md; probe mode embeds
-    # its label space in the trained `.npz` artifact itself.
+    # Only the zero-shot classifier needs prompts.md; probe modes embed
+    # their label space in the trained `.npz` artifact itself.
     prompts_path = None
     if settings.CLASSIFIER_MODE == "zero_shot":
         prompts_path = _resolve_prompts_path(settings)
@@ -217,6 +217,28 @@ def run_webcam(cam_index: int, settings: Settings) -> int:
             return 1
         print(f"loading probe head from {probe_path}", flush=True)
         classifier = ProbeClassifier(models_dir, probe_path, input_size=settings.CLIP_INPUT_SIZE)
+    elif settings.CLASSIFIER_MODE == "siglip_probe":
+        from app.siglip_probe_classifier import SigLIPProbeClassifier
+
+        configured = settings.SIGLIP_PROBE_PATH
+        siglip_probe_path = configured if configured.is_file() else None
+        if siglip_probe_path is None:
+            local = models_dir / "classifier-probe" / "probe_siglip.npz"
+            if local.is_file():
+                siglip_probe_path = local
+        if siglip_probe_path is None:
+            print(
+                f"siglip probe head not found at {configured} or {models_dir}/classifier-probe/; "
+                "train one with scripts/train_probe.py --backend siglip.",
+                file=sys.stderr,
+            )
+            return 1
+        print(
+            f"loading SigLIP probe head from {siglip_probe_path}"
+            f" (encoder: {settings.SIGLIP_MODEL_ID})",
+            flush=True,
+        )
+        classifier = SigLIPProbeClassifier(siglip_probe_path, model_id=settings.SIGLIP_MODEL_ID)
     else:
         print(f"loading prompts from {prompts_path}", flush=True)
         prompts = load_prompts(prompts_path)

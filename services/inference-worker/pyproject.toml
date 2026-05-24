@@ -14,6 +14,11 @@ dependencies = [
     # a pip auto-install at runtime, which we don't want in production.
     "lap>=0.5.12,<1",
     "open-clip-torch>=2.24,<3",
+    # Needed by SigLIPProbeClassifier (CLASSIFIER_MODE=siglip_probe) to
+    # load google/siglip2-base-patch16-256 via AutoModel/AutoProcessor.
+    # Could be moved to an optional extra if the production build never
+    # ships the SigLIP path.
+    "transformers>=4.45,<5",
     "openvino>=2024.4,<2025",
     "opencv-python-headless>=4.10,<5",
     "numpy>=1.26,<2",
