@@ -34,7 +34,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import contextlib
 import json
 import sys
 import time
@@ -216,8 +215,14 @@ async def main() -> int:
                 print(f"harness: task failed: {res!r}", file=sys.stderr)
     finally:
         await r.aclose()
-        async with httpx.AsyncClient(timeout=5.0) as client, contextlib.suppress(Exception):
-            await client.delete(f"{args.gateway_http}/api/session/{session_id}")
+        # Best-effort session teardown; the gateway's idle sweep will pick
+        # it up if the DELETE fails. `contextlib.suppress` is a sync CM, so
+        # wrap with try/except rather than nesting it into `async with`.
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                await client.delete(f"{args.gateway_http}/api/session/{session_id}")
+        except Exception:
+            pass
 
     # 3. Assert.
     print(f"harness: received {len(received)} detection events", flush=True)
