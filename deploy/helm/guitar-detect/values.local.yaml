@@ -1,0 +1,18 @@
+# Per-cluster overrides. Copy / edit before `helm install -f values.local.yaml`.
+#
+# Tag the image set you actually built:
+image:
+  tag: "0.1.0"
+
+# Pin the redis patch (replace "7-alpine" if you want).
+redis:
+  image: redis:7.2.4-alpine
+
+# If your ingress host differs from the default:
+# ingress:
+#   host: guitars.your.lan
+
+# If Longhorn is named differently on your cluster:
+# redis:
+#   storage:
+#     storageClass: longhorn
