@@ -25,14 +25,34 @@ export function useCamera(): UseCameraResult {
   const [error, setError] = useState<string | null>(null);
   const currentStreamRef = useRef<MediaStream | null>(null);
 
-  // Enumerate video inputs once on mount.
+  // Enumerate video inputs once on mount. Chromium anonymizes the result
+  // (empty `deviceId` / `label`) until camera permission has been granted
+  // for this origin, so if we see anonymized entries we trigger a one-shot
+  // permission prompt via `getUserMedia({video:true})`, close the
+  // resulting stream immediately, then re-enumerate to get real ids.
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
-        const list = await navigator.mediaDevices.enumerateDevices();
+        let list = (await navigator.mediaDevices.enumerateDevices()).filter(
+          (d) => d.kind === "videoinput",
+        );
+        const anonymized =
+          list.length > 0 &&
+          list.every((d) => d.deviceId === "" || d.label === "");
+        if (anonymized) {
+          // Prompt for permission; immediately release the stream.
+          const probe = await navigator.mediaDevices.getUserMedia({
+            video: true,
+          });
+          probe.getTracks().forEach((t) => t.stop());
+          if (cancelled) return;
+          list = (await navigator.mediaDevices.enumerateDevices()).filter(
+            (d) => d.kind === "videoinput",
+          );
+        }
         if (cancelled) return;
-        setDevices(list.filter((d) => d.kind === "videoinput"));
+        setDevices(list);
       } catch (e) {
         if (cancelled) return;
         setError(formatError(e, "Could not enumerate camera devices"));
@@ -52,6 +72,12 @@ export function useCamera(): UseCameraResult {
   }, []);
 
   const select = useCallback((deviceId: string) => {
+    if (!deviceId) {
+      // Empty id can slip in if the dropdown was opened and dismissed
+      // without picking a real device; treat as "no selection".
+      setSelected(null);
+      return;
+    }
     setSelected(deviceId);
     setError(null);
     void (async () => {
@@ -76,14 +102,20 @@ export function useCamera(): UseCameraResult {
 }
 
 function formatError(e: unknown, fallback: string): string {
-  if (e instanceof DOMException) {
-    if (e.name === "NotAllowedError") return "Camera permission denied";
-    if (e.name === "NotFoundError") return "No camera found";
-    if (e.name === "OverconstrainedError") {
+  // Duck-type on the `name` property rather than class instance checks.
+  // OverconstrainedError is its own class (not a DOMException), and
+  // jsdom's DOMException may not extend Error — so `instanceof` is
+  // unreliable across environments.
+  if (e && typeof e === "object" && "name" in e) {
+    const name = String((e as { name: unknown }).name);
+    const message =
+      "message" in e ? String((e as { message: unknown }).message) : String(e);
+    if (name === "OverconstrainedError") {
       return "Camera does not match the requested constraints";
     }
-    return `${fallback}: ${e.message}`;
+    if (name === "NotAllowedError") return "Camera permission denied";
+    if (name === "NotFoundError") return "No camera found";
+    return `${fallback}: ${message}`;
   }
-  if (e instanceof Error) return `${fallback}: ${e.message}`;
   return `${fallback}: ${String(e)}`;
 }

@@ -15,7 +15,10 @@ export function CameraPicker({
   onStart,
   starting,
 }: CameraPickerProps): JSX.Element {
-  const canStart = camera.selected !== null && !starting;
+  // Stream must be live before Start so we don't kick off a session against
+  // a camera that hasn't actually attached. `selected` alone isn't enough —
+  // getUserMedia may still be in flight.
+  const canStart = !!camera.selected && !!camera.stream && !starting;
   return (
     <div className="flex flex-col gap-3 max-w-md">
       <label className="flex flex-col gap-1 text-sm">
