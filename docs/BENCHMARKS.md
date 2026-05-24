@@ -57,3 +57,53 @@ Phase 1 gate PASSED: p50 total = 11.12ms < 50ms target
   blowing the gate on this hardware.
 - Dropped-frame count is 0/600: the pipeline comfortably keeps up with
   the 15 fps target on this host.
+
+## 2026-05-24 — classifier head comparison
+
+Train and validation accuracy of a linear probe over each candidate
+image-encoder, on the same dataset (~558 YOLO-cropped Reverb listing
+images across 7 classes: 6 brand+model targets + Unknown). Held-out
+80/20 stratified split, AdamW, no early stop. Reported as
+final-epoch numbers.
+
+| Backbone                            | Embedding dim | Epochs | Train      | Val        |
+| ----------------------------------- | ------------- | ------ | ---------- | ---------- |
+| MobileCLIP-S1 (OpenVINO IR)         | 512           | 300    | 54.3%      | 16.5%      |
+| MobileCLIP-S1                       | 512           | 2000   | 68.3%      | 16.9%      |
+| MobileCLIP-S1, YOLO-cropped data    | 512           | 1000   | 86.8%      | 19.8%      |
+| **google/siglip2-base-patch16-256** | 768           | 1000   | **100.0%** | **100.0%** |
+
+Random-chance baseline is 14.3% (1/7).
+
+**Interpretation.** Linear-probe val accuracy is pinned at chance for
+all MobileCLIP-S1 variants regardless of training duration, dataset
+size (50 → 200 / class), or input quality (raw Reverb listing photos
+vs YOLO-cropped guitar bodies). This is the embedding-ceiling
+signature — the features themselves don't separate Gibson-vs-Fender
+body styles in a generalizable way. Same data, SigLIP-2 cleanly
+separates everything.
+
+The production runtime now defaults to `CLASSIFIER_MODE=siglip_probe`
+(see [`CLASSIFIER.md`](CLASSIFIER.md)). The MobileCLIP probe path is
+kept in the codebase for benchmarking / regression — the SigLIP-2
+deployment is otherwise the source of truth.
+
+**Caveats.** 100% val on Reverb listing crops does not imply 100%
+real-world phone-camera accuracy — train and val come from the same
+domain (polished listing photos). We have no labeled phone-camera
+test set. Live-on-phone behavior is "feels right most of the time
+when the guitar is held steady, drifts during transitions" — see
+the chat session that produced this entry for raw stats.
+
+Inference cost on the same host:
+
+| Stage                                           | MobileCLIP-S1 (probe) | SigLIP-2 (probe) |
+| ----------------------------------------------- | --------------------- | ---------------- |
+| `classify_ms` per crop                          | ~5 ms                 | ~50–100 ms       |
+| End-to-end `total_ms` p50 (with classification) | ~28 ms                | ~80–120 ms       |
+
+Worker stays under the 50 ms Phase 1 target on the MobileCLIP path,
+above it on the SigLIP path. The per-track classify scheduler (every
+6 frames unstable, every 30 stable) absorbs the higher latency in
+practice — the bottleneck is still YOLO + bookkeeping at the frame
+level, not classifier latency at the per-track level.

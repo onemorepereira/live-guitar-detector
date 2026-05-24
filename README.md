@@ -10,6 +10,8 @@ cluster.
 - Detects electric guitars in a webcam stream (YOLOv8n-oiv7).
 - Classifies brand + model across 6 targets:
   Gibson Les Paul · SG · Explorer · Flying V · Fender Stratocaster · Telecaster.
+- Three swappable classifier backends; production uses a linear probe
+  on SigLIP-2 image embeddings (see [docs/CLASSIFIER.md](docs/CLASSIFIER.md)).
 - Tracks each guitar across frames; the HUD overlay shows a brand-colored
   bbox with `Brand Model · confidence%`.
 - Browser-based; no install on the viewing device beyond a one-time CA trust.
@@ -54,10 +56,12 @@ Add `?debug=1` to the URL for the diagnostics overlay.
 
 - [DEVELOPMENT.md](docs/DEVELOPMENT.md) — local dev loop, testing, prompts editing.
 - [DEPLOYMENT.md](docs/DEPLOYMENT.md) — K3s install, Helm chart, upgrade, rollback.
+- [CLASSIFIER.md](docs/CLASSIFIER.md) — the three classifier modes and how to switch.
+- [TRAIN_PROBE.md](services/inference-worker/scripts/TRAIN_PROBE.md) — train your own brand/model probe.
 - [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) — common issues + fixes.
-- [BENCHMARKS.md](docs/BENCHMARKS.md) — Phase 1 latency numbers.
+- [BENCHMARKS.md](docs/BENCHMARKS.md) — latency and classifier-head comparison.
 - [E2E_CHECKLIST.md](docs/E2E_CHECKLIST.md) — manual gate procedure.
-- [docs/prompts.md](docs/prompts.md) — classifier prompts (edit to retune).
+- [docs/prompts.md](docs/prompts.md) — zero-shot classifier prompts (edit to retune).
 - [docs/plans/](docs/plans/) — the implementation plan that drove the build.
 
 ## Status

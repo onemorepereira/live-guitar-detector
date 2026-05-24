@@ -1,4 +1,4 @@
-.PHONY: install lint test test-integration build-images push-images dev dev-down dev-logs prod prod-down help
+.PHONY: install lint test test-integration build build-images push-images dev dev-down dev-logs prod prod-down help
 .DEFAULT_GOAL := help
 
 # Override on the command line to tag a release: `make build-images TAG=1.2.3`.
@@ -30,12 +30,20 @@ prod:    ## Run prod docker-compose stack (built images, no source bind-mounts)
 	docker compose --profile prod up --build
 prod-down: ## Tear down the prod stack
 	docker compose --profile prod down
-build-images: ## Build all container images (override TAG=... for version, default $(TAG))
+build: build-images ## Alias for build-images
+build-images: ## Build all 3 container images in dependency order (TAG=... overrides; default $(TAG))
+	@echo "==> [1/3] frontend-assets:$(TAG)  (npm ci + vite build; ~30s)"
 	docker build services/frontend -t guitar-detect/frontend-assets:$(TAG)
+	@echo "==> [2/3] gateway:$(TAG)          (aiortc deps + frontend bundle; ~1-2 min cold)"
 	docker build services/gateway \
 		--build-arg FRONTEND_IMAGE=guitar-detect/frontend-assets:$(TAG) \
 		-t guitar-detect/gateway:$(TAG)
+	@echo "==> [3/3] inference-worker:$(TAG)  (torch + ultralytics + openvino + SigLIP-2 bake; ~5-10 min cold)"
 	docker build services/inference-worker -t guitar-detect/inference-worker:$(TAG)
+	@echo
+	@echo "All 3 images built. Tag: $(TAG)"
+	@echo "Push with:   make push-images TAG=$(TAG)"
+	@echo "Run prod:    make prod"
 push-images: ## Push container images to registry.local:5000 (override TAG=...)
 	docker tag guitar-detect/gateway:$(TAG)          registry.local:5000/guitar-detect/gateway:$(TAG)
 	docker tag guitar-detect/inference-worker:$(TAG) registry.local:5000/guitar-detect/inference-worker:$(TAG)

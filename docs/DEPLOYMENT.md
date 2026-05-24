@@ -87,6 +87,22 @@ is the per-cluster override starter. Common overrides:
 | `networkPolicies.enabled`          | `true`                | Disabling for debugging                           |
 | `networkPolicies.traefikNamespace` | `kube-system`         | Upstream Traefik install in a dedicated namespace |
 
+### Classifier mode in K8s
+
+The worker's `CLASSIFIER_MODE` is set via `inference.env` in
+`values.yaml`. Production should run `siglip_probe`; the
+`docker-compose.yml` defaults reflect this. The Helm chart values
+will need a matching `inference.env.CLASSIFIER_MODE: siglip_probe`
+override when the next Phase-4 release lands the chart update.
+
+The trained probe head (`probe_siglip.npz`) is dataset-derived and
+belongs in a ConfigMap or PVC, not baked into the image — see
+[`CLASSIFIER.md`](CLASSIFIER.md) for the local-prod compose pattern
+(it mounts `services/inference-worker/app/models/classifier-probe/`
+into `/models/classifier-probe/`). The K8s equivalent is the same
+shape with a ConfigMap or a small PVC populated by the operator
+out-of-band.
+
 ## Operations runbook
 
 ### Watch live detection events for a session

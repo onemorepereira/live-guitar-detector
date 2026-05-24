@@ -1,10 +1,20 @@
-# Dev image for the gateway. Bind-mounts source from the host; uvicorn
-# auto-reloads on file change. NOT for production — the prod Dockerfile
-# lands in Task 3.2.
+# Dev image for the gateway.
+#
+# Differs from the prod image: source comes in via bind-mount from the
+# host so uvicorn --reload picks up edits without a rebuild. Layer
+# ordering still avoids busting the (large) dep install on source
+# edits: pyproject metadata first, deps from pyproject second, source
+# last.
 
 FROM python:3.11-slim AS dev
 
-# aiortc runtime deps (debian bookworm names).
+ENV PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+# aiortc runtime + the gcc the dev workflow occasionally needs for
+# debugging native wheels. ffmpeg makes one-off codec experiments cheap.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libavformat59 \
         libavcodec59 \
@@ -19,15 +29,26 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Copy pyproject + source for the install layer. The bind-mount in
-# docker-compose will override /app/app at runtime; editable install
-# points at /app so reloads see the mounted source.
+# --- layer: pyproject only (caches dep install) ---
 COPY pyproject.toml /app/pyproject.toml
+
+# --- layer: runtime + dev deps from pyproject, no app code ---
+RUN python -c "import tomllib, sys; \
+        data = tomllib.load(open('pyproject.toml','rb')); \
+        deps = list(data['project']['dependencies']); \
+        deps += list(data['project']['optional-dependencies'].get('dev', [])); \
+        sys.stdout.write('\n'.join(deps))" > /tmp/deps.txt \
+    && pip install -r /tmp/deps.txt \
+    && rm /tmp/deps.txt
+
+# --- layer: app + tests (shadowed by bind-mount in compose) ---
+# The dev compose bind-mounts services/gateway/app onto /app/app so
+# uvicorn --reload sees host edits. The COPY here lets the image run
+# standalone for smoke-testing without compose.
 COPY app /app/app
 COPY tests /app/tests
-RUN pip install --no-cache-dir -e ".[dev]"
+RUN pip install --no-deps -e .
 
-ENV PYTHONUNBUFFERED=1
 EXPOSE 8000
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

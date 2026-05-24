@@ -1,45 +1,67 @@
 # Linear-probe classifier — training guide
 
-The runtime worker can use one of two classifiers (selected by the
+The runtime worker can use one of three classifiers (selected by the
 `CLASSIFIER_MODE` env var):
 
-- `zero_shot` (default) — cosine similarity of MobileCLIP image
+- `zero_shot` (default) — cosine similarity of MobileCLIP-S1 image
   features against text prompts from `docs/prompts.md`. No training
   required; accuracy is bounded by how well the prompts capture each
-  class.
-- `probe` — a tiny linear head trained on top of the same image
-  features. Better accuracy on fine-grained brand/model distinctions,
-  at the cost of needing a labeled dataset.
+  class. **Known-poor on the 6 target brand/models.**
+- `probe` — linear head over the same MobileCLIP-S1 image features.
+  Kept for benchmarking; **same accuracy ceiling as zero_shot** on
+  these classes (see [`docs/BENCHMARKS.md`](../../../docs/BENCHMARKS.md)).
+- `siglip_probe` — linear head over `google/siglip2-base-patch16-256`
+  image features. **Production choice**: separates the targets
+  cleanly. Slower per-crop (~50–100 ms vs ~5 ms) but the per-track
+  classify scheduler absorbs it.
 
-This guide covers training and deploying the `probe` head.
+This guide covers training and deploying the probe heads. The
+backend is selected via `--backend {clip,siglip}` on the trainer; the
+script reuses the same dataset layout and produces the same `.npz`
+artifact format either way.
 
-## TL;DR
+See [`docs/CLASSIFIER.md`](../../../docs/CLASSIFIER.md) for a
+higher-level mode comparison.
+
+## TL;DR (production — SigLIP probe)
 
 ```bash
-# 1. Collect ~50 labeled crops per class under data/
+# 1. Collect ~200 labeled crops per class under data/
 data/
-  gibson_les_paul/   *.jpg
-  gibson_sg/         *.jpg
-  gibson_explorer/   *.jpg
-  gibson_flying_v/   *.jpg
-  fender_stratocaster/ *.jpg
-  fender_telecaster/ *.jpg
-  unknown/           *.jpg   # acoustic / bass / other electrics
+  gibson_les_paul/      *.jpg
+  gibson_sg/            *.jpg
+  gibson_explorer/      *.jpg
+  gibson_flying_v/      *.jpg
+  fender_stratocaster/  *.jpg
+  fender_telecaster/    *.jpg
+  unknown/              *.jpg   # acoustic / bass / other electrics
 
-# 2. Train
+# 2. (Optional but recommended) YOLO-crop the dataset so the probe
+#    learns from the same crop quality the runtime pipeline produces.
+#    See the chat session 2026-05-24 for the rationale — about 56% of
+#    Reverb listing primary images are cases / closeups / non-body
+#    shots, and the probe's val accuracy depends on filtering those.
+python scripts/_crop_dataset.py --in ./data --out ./data_crops
+
+# 3. Train SigLIP probe (~50s embed + <1s linear-head training)
 cd services/inference-worker
 source .venv/bin/activate
 python scripts/train_probe.py \
-  --data-dir ./data \
-  --models-dir ./app/models \
-  --out ./app/models/classifier-probe/probe.npz
+  --backend siglip \
+  --data-dir ./data_crops \
+  --out ./app/models/classifier-probe/probe_siglip.npz
 
-# 3. Run the worker in probe mode
-CLASSIFIER_MODE=probe \
-PROBE_PATH=./app/models/classifier-probe/probe.npz \
+# 4. Run the worker in SigLIP probe mode
+CLASSIFIER_MODE=siglip_probe \
+SIGLIP_PROBE_PATH=./app/models/classifier-probe/probe_siglip.npz \
 REDIS_URL=redis://localhost:6379/0 \
   python -m app.main
 ```
+
+For the legacy MobileCLIP `probe` mode, swap `--backend clip` (the
+trainer's default) and pass `--models-dir ./app/models` so it can
+find the MobileCLIP IR. The runtime env vars become `CLASSIFIER_MODE=probe`
+and `PROBE_PATH=./app/models/classifier-probe/probe.npz`.
 
 ## Dataset
 

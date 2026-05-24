@@ -79,10 +79,20 @@ services:
       DETECT_CONF: "0.35"
       DETECT_IOU: "0.5"
       DETECT_IMGSZ: "416"
+      # zero_shot | probe | siglip_probe. siglip_probe needs a trained
+      # probe artifact under /models/classifier-probe/probe_siglip.npz
+      # (see services/inference-worker/scripts/TRAIN_PROBE.md).
+      CLASSIFIER_MODE: siglip_probe
+      SIGLIP_PROBE_PATH: /models/classifier-probe/probe_siglip.npz
+      # HF cache for the SigLIP-2 weights. Bind-mounting the host's
+      # ~/.cache/huggingface keeps the first cold-boot fast on
+      # subsequent runs.
+      HF_HOME: /root/.cache/huggingface
     volumes:
       - ./services/inference-worker/app:/app/app
       - ./services/inference-worker/app/models:/models:ro
       - ./docs/prompts.md:/config/prompts.md:ro
+      - ${HOME}/.cache/huggingface:/root/.cache/huggingface
     networks:
       - internal
 
@@ -133,10 +143,20 @@ services:
       DETECT_CONF: "0.35"
       DETECT_IOU: "0.5"
       DETECT_IMGSZ: "416"
+      # Production classifier. The image bakes SigLIP-2 weights into
+      # the HF cache at build time; only the *trained probe head*
+      # ships separately (it's tied to a specific dataset and tends
+      # to be re-trained more often than the image is rebuilt).
+      CLASSIFIER_MODE: siglip_probe
+      SIGLIP_PROBE_PATH: /models/classifier-probe/probe_siglip.npz
     volumes:
-      # See header note: configmap-style read-only override; K8s replaces
-      # this with a real ConfigMap in Phase 4.
+      # configmap-style read-only overrides. K8s (Phase 4) replaces
+      # these with real ConfigMaps / Secrets that mount the same paths.
       - ./docs/prompts.md:/config/prompts.md:ro
+      # Trained probe head is dataset-derived and lives outside the
+      # image. Re-training is `scripts/train_probe.py --backend siglip`
+      # on the host, then restart this service to pick it up.
+      - ./services/inference-worker/app/models/classifier-probe:/models/classifier-probe:ro
     networks:
       - internal
 

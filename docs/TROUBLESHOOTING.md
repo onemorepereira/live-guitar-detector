@@ -21,13 +21,17 @@ build.
 
 ### Worker
 
-| Symptom                                                    | Cause                                        | Fix                                                                                         |
-| ---------------------------------------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `download_models.py` fails on `MobileCLIP-S0`              | S0 not in OpenCLIP registry                  | Script falls back to S1 automatically; see `services/inference-worker/scripts/README.md`    |
-| `model.track()` raises ImportError for `lap` at runtime    | Ultralytics autoinstalls `lap` on first call | Pinned `lap>=0.5.12,<1` in worker `pyproject.toml` as a worker dep                          |
-| Idempotent re-runs of `download_models.py` skip everything | Sentinel-based caching                       | Delete the relevant `precision.json` to force re-export of a single layer                   |
-| Worker test `requires_model` skips locally                 | Models not downloaded                        | `python scripts/download_models.py all --out app/models/`                                   |
-| Accuracy tests skip even with models present               | Synthetic fixture marker                     | `touch services/inference-worker/tests/fixtures/images/REAL.txt` after dropping real photos |
+| Symptom                                                    | Cause                                                             | Fix                                                                                                                                              |
+| ---------------------------------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `download_models.py` fails on `MobileCLIP-S0`              | S0 not in OpenCLIP registry                                       | Script falls back to S1 automatically; see `services/inference-worker/scripts/README.md`                                                         |
+| `model.track()` raises ImportError for `lap` at runtime    | Ultralytics autoinstalls `lap` on first call                      | Pinned `lap>=0.5.12,<1` in worker `pyproject.toml` as a worker dep                                                                               |
+| Idempotent re-runs of `download_models.py` skip everything | Sentinel-based caching                                            | Delete the relevant `precision.json` to force re-export of a single layer                                                                        |
+| Worker test `requires_model` skips locally                 | Models not downloaded                                             | `python scripts/download_models.py all --out app/models/`                                                                                        |
+| Accuracy tests skip even with models present               | Synthetic fixture marker                                          | `touch services/inference-worker/tests/fixtures/images/REAL.txt` after dropping real photos                                                      |
+| HUD always shows "Analyzing…", never a brand/model         | `CLASSIFIER_MODE=zero_shot` and the rejection prompts are winning | Switch to `siglip_probe` (see [CLASSIFIER.md](CLASSIFIER.md)) and train a probe                                                                  |
+| `siglip_probe` startup error: probe head missing           | Probe `.npz` not on disk                                          | `python scripts/train_probe.py --backend siglip ...` to generate one (see [TRAIN_PROBE.md](../services/inference-worker/scripts/TRAIN_PROBE.md)) |
+| `siglip_probe` startup error: cannot load model from HF    | `TRANSFORMERS_OFFLINE=1` set but HF cache empty                   | Pre-warm the cache (image build does this automatically) or unset the env var temporarily                                                        |
+| Worker pegs CPU when in `siglip_probe` mode                | SigLIP-2 inference is ~50–100ms/crop on CPU                       | Expected; the per-track classify scheduler keeps total throughput in budget. Drop to `probe` mode if absolutely starved for CPU                  |
 
 ### Gateway
 

@@ -1,13 +1,24 @@
-# Dev image for the inference worker. Bind-mounts source + the local
-# model dir from the host. NOT for production — Task 3.3 ships the prod
-# image with models baked in and may switch to the openvino/ubuntu22_runtime
-# base for size/perf reasons.
+# Dev image for the inference worker.
 #
-# We use python:3.11-slim here (rather than the OpenVINO base, which ships
-# Python 3.10) so the worker's `requires-python = >=3.11,<3.12` pin holds
-# without relaxation. OpenVINO is installed via pip as a normal runtime dep.
+# Differs from the prod image: source is bind-mounted (not COPY'd into
+# the image) so the developer iterates with no rebuild. Models also
+# come in via bind-mount from the host's app/models/ rather than being
+# baked. The HF cache for SigLIP-2 is bind-mounted from the host's
+# `~/.cache/huggingface` so the dev's first transformers download is
+# reused.
+#
+# Layer ordering mirrors the prod image (apt deps → pyproject metadata
+# → pip install runtime+dev deps → done) so source edits don't bust
+# the large pip layer.
 
 FROM python:3.11-slim AS dev
+
+ENV PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    MODELS_DIR=/models \
+    PROMPTS_FILE=/config/prompts.md
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libgl1 \
@@ -18,13 +29,26 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
+# --- layer: pyproject only (caches dep install) ---
 COPY pyproject.toml /app/pyproject.toml
+
+# --- layer: runtime + dev deps from pyproject, no app code ---
+# Same tomllib-extraction trick as the prod image so a source edit on
+# the host doesn't invalidate this layer when the image is rebuilt.
+RUN python -c "import tomllib, sys; \
+        data = tomllib.load(open('pyproject.toml','rb')); \
+        deps = list(data['project']['dependencies']); \
+        deps += list(data['project']['optional-dependencies'].get('dev', [])); \
+        sys.stdout.write('\n'.join(deps))" > /tmp/deps.txt \
+    && pip install -r /tmp/deps.txt \
+    && rm /tmp/deps.txt
+
+# --- layer: app + tests (will be shadowed by bind-mount in compose) ---
+# Copying these in lets you `docker run` the image standalone for
+# smoke-testing without compose; the dev compose bind-mounts the
+# source directories on top.
 COPY app /app/app
 COPY tests /app/tests
-RUN pip install --no-cache-dir -e ".[dev]"
-
-ENV PYTHONUNBUFFERED=1
-ENV MODELS_DIR=/models
-ENV PROMPTS_FILE=/config/prompts.md
+RUN pip install --no-deps -e .
 
 CMD ["python3", "-m", "app.main"]
