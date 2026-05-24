@@ -1,0 +1,115 @@
+{{- if .Values.redis.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "guitar-detect.fullname" . }}-redis
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    {{- include "guitar-detect.componentLabels" (dict "ctx" . "component" "redis") | nindent 4 }}
+data:
+  redis.conf: |
+    # Per DESIGN.md §7.3 — ephemeral session bus, bounded memory, no
+    # disk persistence (sessions live <10s).
+    appendonly no
+    save ""
+    maxmemory 512mb
+    maxmemory-policy allkeys-lru
+    # Bind to all interfaces inside the pod; the headless Service makes
+    # it reachable as `<fullname>-redis.<ns>.svc.cluster.local`.
+    bind 0.0.0.0
+    protected-mode no
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "guitar-detect.fullname" . }}-redis
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    {{- include "guitar-detect.componentLabels" (dict "ctx" . "component" "redis") | nindent 4 }}
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+      protocol: TCP
+  selector:
+    {{- include "guitar-detect.componentSelectorLabels" (dict "ctx" . "component" "redis") | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "guitar-detect.fullname" . }}-redis
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    {{- include "guitar-detect.componentLabels" (dict "ctx" . "component" "redis") | nindent 4 }}
+spec:
+  serviceName: {{ include "guitar-detect.fullname" . }}-redis
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "guitar-detect.componentSelectorLabels" (dict "ctx" . "component" "redis") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "guitar-detect.componentSelectorLabels" (dict "ctx" . "component" "redis") | nindent 8 }}
+        {{- include "guitar-detect.componentLabels" (dict "ctx" . "component" "redis") | nindent 8 }}
+    spec:
+      {{- with .Values.redis.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: redis
+          image: {{ .Values.redis.image | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - "redis-server"
+            - "/etc/redis/redis.conf"
+          ports:
+            - name: redis
+              containerPort: 6379
+              protocol: TCP
+          livenessProbe:
+            tcpSocket:
+              port: redis
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "1"
+              memory: "768Mi"   # 512Mb data + headroom
+          volumeMounts:
+            - name: config
+              mountPath: /etc/redis
+              readOnly: true
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "guitar-detect.fullname" . }}-redis
+            items:
+              - key: redis.conf
+                path: redis.conf
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "guitar-detect.componentLabels" (dict "ctx" . "component" "redis") | nindent 10 }}
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: {{ .Values.redis.storage.storageClass | quote }}
+        resources:
+          requests:
+            storage: {{ .Values.redis.storage.size | quote }}
+{{- end }}
