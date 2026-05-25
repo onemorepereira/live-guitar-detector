@@ -166,11 +166,21 @@ class WebRTCManager:
                 # state callback shouldn't block aiortc's internal loop.
                 self._spawn_bg(self._teardown(session_id))
 
+        # Dump candidates from both SDPs — when TURN is in play and ICE
+        # is failing, seeing each side's candidate list is the only way to
+        # confirm what's actually being advertised.
+        offer_cands = [ln for ln in sdp.splitlines() if "candidate" in ln.lower()]
+        logger.info("session={} OFFER candidates: {}", session_id, offer_cands or "none yet")
+
         await peer.setRemoteDescription(RTCSessionDescription(sdp=sdp, type=sdp_type))
         answer = await peer.createAnswer()
         await peer.setLocalDescription(answer)
 
-        return {"sdp": peer.localDescription.sdp, "type": peer.localDescription.type}
+        answer_sdp = peer.localDescription.sdp
+        answer_cands = [ln for ln in answer_sdp.splitlines() if "candidate" in ln.lower()]
+        logger.info("session={} ANSWER candidates: {}", session_id, answer_cands or "none gathered")
+
+        return {"sdp": answer_sdp, "type": peer.localDescription.type}
 
     def _spawn_bg(self, coro) -> asyncio.Task:
         """Schedule a fire-and-forget coroutine, retaining a strong ref.
