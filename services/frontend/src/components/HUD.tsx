@@ -96,11 +96,20 @@ const ALPHA_INITIAL = 0.3;
 const ALPHA_STEP = 0.175;
 /**
  * Hold the last-known bbox for this long after a track stops appearing in
- * the props. Masks single-frame detection drops; tuned by eyeball — long
- * enough to absorb one missed event from a 10–15 Hz worker, short enough
- * that a truly-vanished guitar doesn't visibly linger.
+ * the props. Phone testing showed YOLO can miss a target for 1-2 seconds
+ * at awkward angles; without a generous grace window the box flickers
+ * off-and-on. 1500 ms is the eyeballed sweet spot — long enough to mask
+ * routine misses, short enough that a truly-vanished guitar doesn't
+ * visibly linger.
  */
-const HOLD_MS = 150;
+const HOLD_MS = 1500;
+/**
+ * Don't draw a track until it has survived this many emitted detection
+ * events. Suppresses single-frame "ghost" tracks (ByteTrack occasionally
+ * spawns a track that dies the next frame) that otherwise show as a
+ * brief box-flash on screen.
+ */
+const MIN_DRAW_AGE_FRAMES = 3;
 /**
  * Per-frame interpolation fraction. At 60 FPS this reaches ~95 % of the
  * target in ~100 ms — fast enough to feel responsive, slow enough that
@@ -222,6 +231,10 @@ export function HUD({
             st.currentBbox[i] = st.targetBbox[i];
           }
         }
+        // Suppress sub-MIN_DRAW_AGE_FRAMES tracks — they flash on screen
+        // before ByteTrack confirms them. State is kept so they can
+        // mature into a draw on a subsequent frame.
+        if (st.detection.age_frames < MIN_DRAW_AGE_FRAMES) continue;
         drawTrack(ctx, st.detection, st.currentBbox, rect, id === highlighted);
       }
       for (const id of expired) state.delete(id);

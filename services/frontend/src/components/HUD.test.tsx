@@ -147,8 +147,11 @@ describe("HUD", () => {
     expect(lastCall[2]).toBeGreaterThan(27);
   });
 
-  it("ramps opacity from 0.3 → 1.0 across age_frames 1..5", () => {
-    const ages = [1, 3, 5, 10];
+  it("ramps opacity from 0.65 → 1.0 once the track passes the min-draw age", () => {
+    // Tracks with age_frames < MIN_DRAW_AGE_FRAMES (3) are intentionally
+    // suppressed to mask ByteTrack ghosts. The opacity ramp itself still
+    // starts at 0.3 for age=1; we just don't render until age=3.
+    const ages = [3, 4, 5, 10];
     const alphas: number[] = [];
     for (const age of ages) {
       stubCtx = mockCtx();
@@ -166,8 +169,8 @@ describe("HUD", () => {
       alphas.push(alphaCalls[0]);
       unmount();
     }
-    expect(alphas[0]).toBeCloseTo(0.3, 2); // age=1 → 0.3
-    expect(alphas[1]).toBeCloseTo(0.65, 2); // age=3 → 0.3 + 2*0.175
+    expect(alphas[0]).toBeCloseTo(0.65, 2); // age=3 → 0.3 + 2*0.175
+    expect(alphas[1]).toBeCloseTo(0.825, 2); // age=4 → 0.3 + 3*0.175
     expect(alphas[2]).toBeCloseTo(1.0, 2); // age=5 → 0.3 + 4*0.175 = 1.0
     expect(alphas[3]).toBeCloseTo(1.0, 2); // age=10 → clamped at 1.0
   });
@@ -260,18 +263,18 @@ describe("HUD smoothing + hold", () => {
 
     // Tracks vanish. Within the hold window the box must still be drawn.
     rerender(<HUD tracks={[]} videoRect={rect} />);
-    stepFrame(100); // 100 ms after lastSeenAt (0) → still inside HOLD_MS (150).
+    stepFrame(1000); // 1 s after lastSeenAt → still inside HOLD_MS (1500).
     const strokeRectsHold = (
       smoothCtx.ctx.strokeRect as unknown as ReturnType<typeof vi.fn>
     ).mock.calls.length;
     expect(strokeRectsHold).toBeGreaterThan(strokeRectsBefore);
 
     // Past the hold window the box must be pruned.
-    stepFrame(200); // 200 ms after lastSeenAt → outside HOLD_MS.
+    stepFrame(2000); // 2 s after lastSeenAt → outside HOLD_MS.
     const strokeRectsAfter = (
       smoothCtx.ctx.strokeRect as unknown as ReturnType<typeof vi.fn>
     ).mock.calls.length;
-    // No new strokeRect calls between t=100 and t=200 — the box is gone.
+    // No new strokeRect calls between t=1000 and t=2000 — the box is gone.
     expect(strokeRectsAfter).toBe(strokeRectsHold);
   });
 
