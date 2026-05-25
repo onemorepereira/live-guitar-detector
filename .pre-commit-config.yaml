@@ -10,10 +10,6 @@ repos:
       - id: end-of-file-fixer
       - id: trailing-whitespace
       - id: check-yaml
-        # Helm chart templates are Go templates, not plain YAML — they
-        # frequently contain `{{- ... -}}` actions that fail YAML parsing
-        # but are valid Helm. `helm lint` covers them instead.
-        exclude: ^deploy/helm/[^/]+/templates/
       - id: check-added-large-files
         args: ["--maxkb=1024"]
 
@@ -36,12 +32,4 @@ repos:
           - json
           - css
         # DESIGN.md is kept verbatim — never let prettier touch it.
-        # Helm chart templates are Go templates, not YAML — prettier
-        # mangles them. Helm values files are also excluded to preserve
-        # author-chosen comment spacing (DESIGN.md §7.2 alignment).
-        exclude: |
-          (?x)^(
-            DESIGN\.md|
-            deploy/helm/[^/]+/templates/.*|
-            deploy/helm/[^/]+/values(\.[^/]+)?\.yaml
-          )$
+        exclude: ^DESIGN\.md$

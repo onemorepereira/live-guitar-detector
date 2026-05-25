@@ -1,52 +1,44 @@
 # Deployment
 
-Target: 2-node home K3s cluster. One node labeled `workload=io` (gateway, redis, registry), one node `workload=compute` (inference).
+Cluster manifests live in the **separate** `k3s` repo
+(`~/Extra/repos/personal/k3s/`) under `cluster/guitar-detect/`. That
+repo is the single source of truth for the Helm chart, namespace,
+HelmRelease, and Flux Kustomization — this repo only builds and pushes
+the container images.
 
-See [`deploy/k3s/README.md`](../deploy/k3s/README.md) for cluster
-bootstrap (registry install, mkcert TLS, root CA install per device, DNS).
+Deployment is GitOps via FluxCD: commit to the k3s repo → Flux
+reconciles within ~30 min (or `flux reconcile kustomization
+guitar-detect` to force).
 
 ## First-time install
 
 ```bash
-# 0. Cluster prereqs (see deploy/k3s/README.md):
-#    - K3s ≥ 1.28, Longhorn as default storage class
-#    - kubectl context pointed at the cluster
-#    - mkcert installed on the operator host
-
-# 1. Label nodes
-MOBILE_NODE=mobile COMPUTE_NODE=ryzen \
-  ./deploy/k3s/label-nodes.sh
-
-# 2. Local registry (one node hosts it via hostNetwork:5000)
-./deploy/k3s/install-registry.sh
-# Follow printed instructions:
-#   - Add /etc/rancher/k3s/registries.yaml to every node + restart k3s.
-#   - Add `<io-node-ip> registry.local` to /etc/hosts on every node and
-#     dev host.
-
-# 3. Build + push images
+# 1. Build + push images to the in-cluster registry
 make build-images TAG=0.1.0
 make push-images  TAG=0.1.0
+# REGISTRY defaults to registry.home.devoops.co; override with
+#   make push-images REGISTRY=ghcr.io/me TAG=0.1.0
 
-# 4. TLS cert
-./deploy/k3s/install-mkcert-cert.sh
-# Then install $(mkcert -CAROOT)/rootCA.pem on every viewing device per
-# the README's per-platform instructions.
+# 2. Train the SigLIP probe locally if you don't have one yet
+cd services/inference-worker && source .venv/bin/activate
+python scripts/train_probe.py --backend siglip \
+  --data-dir ./data_crops \
+  --out ./app/models/classifier-probe/probe_siglip.npz
 
-# 5. DNS — find the ingress IP:
-kubectl -n kube-system get svc traefik \
-  -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
-# Add `<ingress-ip> guitars.home.lan` to your router DNS or /etc/hosts.
+# 3. Sync the probe artifact into the k3s repo's chart
+cp services/inference-worker/app/models/classifier-probe/probe_siglip.npz \
+   ~/Extra/repos/personal/k3s/cluster/guitar-detect/chart/files/probe_siglip.npz
 
-# 6. Deploy with Helm
-helm install guitar-detect deploy/helm/guitar-detect \
-  -f deploy/helm/guitar-detect/values.local.yaml \
-  --create-namespace --namespace guitar-detect
+# 4. Commit the k3s repo
+cd ~/Extra/repos/personal/k3s
+git add cluster/guitar-detect cluster/infrastructure/flux-kustomizations.yml
+git commit -m "feat(guitar-detect): add app"
+git push
 
-# 7. Smoke test
-./deploy/k3s/smoke-test.sh
+# 5. Wait for reconciliation (or force it)
+flux reconcile kustomization guitar-detect
 
-# 8. Open https://guitars.home.lan on a phone or desktop.
+# 6. Open https://guitars.home.devoops.co on a phone or desktop.
 ```
 
 ## Upgrade
@@ -55,53 +47,72 @@ helm install guitar-detect deploy/helm/guitar-detect \
 make build-images TAG=0.2.0
 make push-images  TAG=0.2.0
 
-helm upgrade guitar-detect deploy/helm/guitar-detect \
-  -f deploy/helm/guitar-detect/values.local.yaml \
-  --set image.tag=0.2.0 \
-  --namespace guitar-detect
+# In the k3s repo, bump values.image.tag in helmrelease.yml:
+cd ~/Extra/repos/personal/k3s
+# edit cluster/guitar-detect/helmrelease.yml -> values.image.tag: "0.2.0"
+git commit -am "chore(guitar-detect): bump to 0.2.0"
+git push
 ```
 
 Rolling upgrade: gateway is 1 replica (brief outage during pod swap);
 inference is 1 replica (sessions detect the gap and reconnect within
-~10 s — see Test 9 in [E2E_CHECKLIST.md](E2E_CHECKLIST.md)).
+~10 s).
+
+## Retraining the probe
+
+The probe is shipped as a binary ConfigMap rendered from
+`chart/files/probe_siglip.npz` in the k3s repo. To roll out a new probe:
+
+```bash
+# Retrain locally per services/inference-worker/scripts/TRAIN_PROBE.md.
+# Then sync + commit:
+cp services/inference-worker/app/models/classifier-probe/probe_siglip.npz \
+   ~/Extra/repos/personal/k3s/cluster/guitar-detect/chart/files/probe_siglip.npz
+cd ~/Extra/repos/personal/k3s
+git commit -am "chore(guitar-detect): retrain SigLIP probe"
+git push
+```
+
+Flux re-renders the ConfigMap, the worker Deployment picks up the new
+mount on the next pod rollout (force one with `kubectl -n guitar-detect
+rollout restart deploy/guitar-detect-inference`).
 
 ## Rollback
 
 ```bash
-helm history guitar-detect -n guitar-detect          # list revisions
-helm rollback guitar-detect <REVISION> -n guitar-detect
+# Revert the k3s-repo commit:
+cd ~/Extra/repos/personal/k3s
+git revert <commit>
+git push
+flux reconcile kustomization guitar-detect
+```
+
+Or for a fast in-cluster rollback without touching git:
+
+```bash
+helm history guitar-detect -n guitar-detect
+helm rollback guitar-detect <REV> -n guitar-detect
+# (Flux will reconcile back to the git state on the next interval.)
 ```
 
 ## Values reference
 
-`deploy/helm/guitar-detect/values.yaml` is the schema. `values.local.yaml`
-is the per-cluster override starter. Common overrides:
+The chart's `values.yaml` lives at `cluster/guitar-detect/chart/values.yaml`
+in the k3s repo. Per-cluster overrides go in `cluster/guitar-detect/helmrelease.yml`
+under `spec.values`. Common keys:
 
-| Key                                | Default               | Override when                                     |
-| ---------------------------------- | --------------------- | ------------------------------------------------- |
-| `image.tag`                        | `0.1.0`               | Bumping releases                                  |
-| `image.registry`                   | `registry.local:5000` | Using a different registry                        |
-| `redis.image`                      | `redis:7-alpine`      | Pinning a specific Redis patch                    |
-| `ingress.host`                     | `guitars.home.lan`    | Using a different hostname                        |
-| `inference.replicas`               | `1`                   | (Future) horizontal scaling                       |
-| `networkPolicies.enabled`          | `true`                | Disabling for debugging                           |
-| `networkPolicies.traefikNamespace` | `kube-system`         | Upstream Traefik install in a dedicated namespace |
-
-### Classifier mode in K8s
-
-The worker's `CLASSIFIER_MODE` is set via `inference.env` in
-`values.yaml`. Production should run `siglip_probe`; the
-`docker-compose.yml` defaults reflect this. The Helm chart values
-will need a matching `inference.env.CLASSIFIER_MODE: siglip_probe`
-override when the next Phase-4 release lands the chart update.
-
-The trained probe head (`probe_siglip.npz`) is dataset-derived and
-belongs in a ConfigMap or PVC, not baked into the image — see
-[`CLASSIFIER.md`](CLASSIFIER.md) for the local-prod compose pattern
-(it mounts `services/inference-worker/app/models/classifier-probe/`
-into `/models/classifier-probe/`). The K8s equivalent is the same
-shape with a ConfigMap or a small PVC populated by the operator
-out-of-band.
+| Key                                | Default                    | Override when                                     |
+| ---------------------------------- | -------------------------- | ------------------------------------------------- |
+| `image.tag`                        | `0.1.0`                    | Bumping releases                                  |
+| `image.registry`                   | `registry.home.devoops.co` | Using a different registry                        |
+| `redis.image`                      | `redis:7-alpine`           | Pinning a specific Redis patch                    |
+| `ingress.host`                     | `guitars.home.devoops.co`  | Using a different hostname                        |
+| `ingress.tls.issuer`               | `letsencrypt-prod`         | Using a different cert-manager ClusterIssuer      |
+| `inference.replicas`               | `1`                        | (Future) horizontal scaling                       |
+| `inference.env.CLASSIFIER_MODE`    | `siglip_probe`             | Falling back to `zero_shot` or `probe`            |
+| `inference.probe.enabled`          | `true`                     | Deploying without a probe (e.g. zero-shot mode)   |
+| `networkPolicies.enabled`          | `true`                     | Disabling for debugging                           |
+| `networkPolicies.traefikNamespace` | `kube-system`              | Upstream Traefik install in a dedicated namespace |
 
 ## Operations runbook
 
@@ -109,14 +120,14 @@ out-of-band.
 
 ```bash
 SID=<session-id-from-browser-debug-panel>
-kubectl -n guitar-detect exec -it sts/<redis-pod> -- \
+kubectl -n guitar-detect exec -it sts/guitar-detect-redis -- \
   redis-cli XREAD BLOCK 0 STREAMS detections:${SID} '$'
 ```
 
 ### Check frame backlog
 
 ```bash
-kubectl -n guitar-detect exec -it sts/<redis-pod> -- \
+kubectl -n guitar-detect exec -it sts/guitar-detect-redis -- \
   redis-cli XLEN frames:${SID}
 ```
 
@@ -130,7 +141,7 @@ kubectl -n guitar-detect logs -l app.kubernetes.io/component=inference \
 ### Force session cleanup
 
 ```bash
-kubectl -n guitar-detect exec -it deploy/<gateway-pod> -- \
+kubectl -n guitar-detect exec -it deploy/guitar-detect-gateway -- \
   curl -X DELETE http://localhost:8000/api/session/${SID}
 ```
 

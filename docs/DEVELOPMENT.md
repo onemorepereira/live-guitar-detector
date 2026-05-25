@@ -129,8 +129,9 @@ services/
   gateway/             FastAPI + aiortc + Redis client + WS forwarder
   inference-worker/    YOLO + ByteTrack + MobileCLIP + voting pipeline
   frontend/            React + Vite + Tailwind + Canvas HUD
-deploy/
-  helm/guitar-detect/  Helm chart for K3s install
-  k3s/                 cluster bootstrap scripts (registry, mkcert, labels)
 docs/                  spec, plan, benchmarks, checklists
 ```
+
+Cluster manifests (Helm chart, FluxCD HelmRelease, Kustomization) live
+in the separate `~/Extra/repos/personal/k3s/` repo under
+`cluster/guitar-detect/`. See [DEPLOYMENT.md](DEPLOYMENT.md).

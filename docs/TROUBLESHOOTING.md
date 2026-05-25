@@ -4,15 +4,15 @@
 
 (From DESIGN.md §10.3 plus lessons learned during implementation.)
 
-| Symptom                          | Likely cause                                    | Fix                                                                                        |
-| -------------------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| Browser: no camera in picker     | Not on HTTPS or mkcert CA missing on device     | Install mkcert root CA on the device per [`deploy/k3s/README.md`](../deploy/k3s/README.md) |
-| Browser: WebRTC connection fails | Traefik not forwarding WS / UDP issues          | Check Traefik logs; confirm UDP not needed (aiortc TCP fallback)                           |
-| No detections appearing          | Worker can't reach Redis OR no frames flowing   | `kubectl logs` worker; check `XLEN frames:*` in redis                                      |
-| Wrong classifications            | CLIP prompts off OR detector cropping wrong     | Tweak `docs/prompts.md`; verify bbox padding in `classifier.py`                            |
-| Worker pod OOMKilled             | Model memory grew (multi-replica on same node?) | Increase limit OR reduce replicas                                                          |
-| High latency                     | Inference falling behind                        | Check `frames_dropped_total`; reduce `MAX_INGEST_FPS` or `DETECT_IMGSZ`                    |
-| Pod scheduled on wrong node      | Node labels missing or mismatched               | Re-run `label-nodes.sh`, `kubectl describe node`                                           |
+| Symptom                          | Likely cause                                    | Fix                                                                                                                 |
+| -------------------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Browser: no camera in picker     | Not on HTTPS                                    | Cluster ingress terminates TLS via cert-manager (Let's Encrypt). For local dev see [DEVELOPMENT.md](DEVELOPMENT.md) |
+| Browser: WebRTC connection fails | Traefik not forwarding WS / UDP issues          | Check Traefik logs; confirm UDP not needed (aiortc TCP fallback)                                                    |
+| No detections appearing          | Worker can't reach Redis OR no frames flowing   | `kubectl logs` worker; check `XLEN frames:*` in redis                                                               |
+| Wrong classifications            | CLIP prompts off OR detector cropping wrong     | Tweak `docs/prompts.md`; verify bbox padding in `classifier.py`                                                     |
+| Worker pod OOMKilled             | Model memory grew (multi-replica on same node?) | Increase limit OR reduce replicas                                                                                   |
+| High latency                     | Inference falling behind                        | Check `frames_dropped_total`; reduce `MAX_INGEST_FPS` or `DETECT_IMGSZ`                                             |
+| Pod scheduled on wrong node      | Node labels missing or mismatched               | Re-run `label-nodes.sh`, `kubectl describe node`                                                                    |
 
 ## Implementation-time gotchas
 

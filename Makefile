@@ -4,6 +4,11 @@
 # Override on the command line to tag a release: `make build-images TAG=1.2.3`.
 TAG ?= 0.1.0
 
+# Container registry images are pushed to. Cluster default is the in-cluster
+# registry exposed at registry.home.devoops.co. Override per-target with
+# `make push-images REGISTRY=ghcr.io/me`.
+REGISTRY ?= registry.home.devoops.co
+
 # Container runtime detection.
 #
 # Prefer docker if present (most CI / cloud envs ship it); fall back to
@@ -78,8 +83,8 @@ build-images: _check_runtime ## Build all 3 container images in dependency order
 	@echo "All 3 images built. Tag: $(TAG)"
 	@echo "Push with:   make push-images TAG=$(TAG)"
 	@echo "Run prod:    make prod"
-push-images: _check_runtime ## Push container images to registry.local:5000 (override TAG=...)
-	$(CONTAINER) tag guitar-detect/gateway:$(TAG)          registry.local:5000/guitar-detect/gateway:$(TAG)
-	$(CONTAINER) tag guitar-detect/inference-worker:$(TAG) registry.local:5000/guitar-detect/inference-worker:$(TAG)
-	$(CONTAINER) push registry.local:5000/guitar-detect/gateway:$(TAG)
-	$(CONTAINER) push registry.local:5000/guitar-detect/inference-worker:$(TAG)
+push-images: _check_runtime ## Push container images to $(REGISTRY) (override REGISTRY=... TAG=...)
+	$(CONTAINER) tag guitar-detect/gateway:$(TAG)          $(REGISTRY)/guitar-detect/gateway:$(TAG)
+	$(CONTAINER) tag guitar-detect/inference-worker:$(TAG) $(REGISTRY)/guitar-detect/inference-worker:$(TAG)
+	$(CONTAINER) push $(REGISTRY)/guitar-detect/gateway:$(TAG)
+	$(CONTAINER) push $(REGISTRY)/guitar-detect/inference-worker:$(TAG)
