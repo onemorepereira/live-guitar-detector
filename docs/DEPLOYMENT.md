@@ -101,18 +101,31 @@ The chart's `values.yaml` lives at `cluster/guitar-detect/chart/values.yaml`
 in the k3s repo. Per-cluster overrides go in `cluster/guitar-detect/helmrelease.yml`
 under `spec.values`. Common keys:
 
-| Key                                | Default                    | Override when                                     |
-| ---------------------------------- | -------------------------- | ------------------------------------------------- |
-| `image.tag`                        | `0.1.0`                    | Bumping releases                                  |
-| `image.registry`                   | `registry.home.devoops.co` | Using a different registry                        |
-| `redis.image`                      | `redis:7-alpine`           | Pinning a specific Redis patch                    |
-| `ingress.host`                     | `guitars.home.devoops.co`  | Using a different hostname                        |
-| `ingress.tls.issuer`               | `letsencrypt-prod`         | Using a different cert-manager ClusterIssuer      |
-| `inference.replicas`               | `1`                        | (Future) horizontal scaling                       |
-| `inference.env.CLASSIFIER_MODE`    | `siglip_probe`             | Falling back to `zero_shot` or `probe`            |
-| `inference.probe.enabled`          | `true`                     | Deploying without a probe (e.g. zero-shot mode)   |
-| `networkPolicies.enabled`          | `true`                     | Disabling for debugging                           |
-| `networkPolicies.traefikNamespace` | `kube-system`              | Upstream Traefik install in a dedicated namespace |
+| Key                                 | Default                    | Override when                                                                                               |
+| ----------------------------------- | -------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `image.tag`                         | `0.1.0`                    | Bumping releases                                                                                            |
+| `image.registry`                    | `registry.home.devoops.co` | Using a different registry                                                                                  |
+| `redis.image`                       | `redis:7-alpine`           | Pinning a specific Redis patch                                                                              |
+| `ingress.host`                      | `guitars.home.devoops.co`  | Using a different hostname                                                                                  |
+| `ingress.tls.issuer`                | `letsencrypt-prod`         | Using a different cert-manager ClusterIssuer                                                                |
+| `inference.replicas`                | `1`                        | (Future) horizontal scaling                                                                                 |
+| `inference.env.CLASSIFIER_MODE`     | `siglip_probe`             | Falling back to `zero_shot` or `probe`                                                                      |
+| `inference.env.DETECT_CONF`         | `0.35`                     | Lower → more sensitive YOLO (catches more borderline frames; more spurious dets — ByteTrack's vote absorbs) |
+| `inference.probe.enabled`           | `true`                     | Deploying without a probe (e.g. zero-shot mode)                                                             |
+| `coturn.enabled`                    | `true`                     | Disable only if you have a different TURN relay or your phones can reach the gateway directly (rare in K8s) |
+| `coturn.loadBalancerIP`             | `192.168.86.7`             | A free IP in your MetalLB pool. coturn's `external-ip` is baked from this so the values MUST match.         |
+| `coturn.username`/`coturn.password` | `guitar`/`change-me`       | LAN-only credentials. Override via `helmrelease.yml` `spec.values`. SOPS-encrypt if the repo isn't private. |
+| `networkPolicies.enabled`           | `true`                     | Disabling for debugging                                                                                     |
+| `networkPolicies.traefikNamespace`  | `kube-system`              | Upstream Traefik install in a dedicated namespace                                                           |
+
+### Why the cluster needs coturn
+
+The gateway runs aiortc in a pod with a `10.42.x.x` cluster-internal IP that
+isn't routable from the LAN. Without a TURN relay, a phone's WebRTC stack
+gathers ICE candidates that can never reach the gateway, and ICE never
+completes. The chart ships a `coturn` Deployment + LoadBalancer Service
+pinned to a MetalLB IP; the gateway advertises that IP to clients via
+`GET /api/config` and uses it itself as an ICE relay. See `chart/templates/coturn.yaml`.
 
 ## Operations runbook
 
