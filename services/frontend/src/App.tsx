@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createSession, deleteSession } from "./api/session";
 import { CameraPicker } from "./components/CameraPicker";
 import { DebugPanel } from "./components/DebugPanel";
-import { GalleryPanel } from "./components/GalleryPanel";
+import { GalleryFab } from "./components/GalleryFab";
 import { VideoStage } from "./components/VideoStage";
 import { useCamera } from "./hooks/useCamera";
 import { useDetections } from "./hooks/useDetections";
@@ -121,16 +121,14 @@ export function App(): JSX.Element {
           >
             Stop
           </button>
-          {/* Captured crops, floating top-right over the video. */}
-          {gallery.items.length > 0 && (
-            <div className="fixed top-3 right-3 z-20 w-56 md:w-64 max-h-[60vh] overflow-y-auto rounded bg-zinc-950/80 backdrop-blur-sm shadow-lg">
-              <GalleryPanel
-                items={gallery.items}
-                highlightedTrackId={highlightedTrackId}
-                onSelect={setHighlightedTrackId}
-              />
-            </div>
-          )}
+          {/* Captures launcher: a tiny pill bottom-right; tap to open
+              a bottom sheet with the full panel. Keeps the camera view
+              unobscured by default. */}
+          <GalleryFab
+            items={gallery.items}
+            highlightedTrackId={highlightedTrackId}
+            onSelect={setHighlightedTrackId}
+          />
         </>
       )}
 
