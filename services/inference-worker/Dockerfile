@@ -33,7 +33,7 @@ ARG SIGLIP_MODEL_ID=google/siglip2-base-patch16-256
 ARG HF_HOME_DIR=/opt/hf-cache
 
 # ---------- builder stage ----------
-FROM python:${PYTHON_VERSION}-slim AS builder
+FROM docker.io/library/python:${PYTHON_VERSION}-slim AS builder
 
 ARG SIGLIP_MODEL_ID
 ARG HF_HOME_DIR
@@ -101,7 +101,7 @@ COPY app ./app
 RUN pip install --prefix=/install --no-deps .
 
 # ---------- runtime stage ----------
-FROM python:${PYTHON_VERSION}-slim AS runtime
+FROM docker.io/library/python:${PYTHON_VERSION}-slim AS runtime
 
 ARG HF_HOME_DIR
 

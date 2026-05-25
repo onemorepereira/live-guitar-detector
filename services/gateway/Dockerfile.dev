@@ -6,7 +6,7 @@
 # edits: pyproject metadata first, deps from pyproject second, source
 # last.
 
-FROM python:3.11-slim AS dev
+FROM docker.io/library/python:3.11-slim AS dev
 
 ENV PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \

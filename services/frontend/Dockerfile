@@ -7,7 +7,7 @@
 # This image is NEVER run as a container — it has no entrypoint.
 
 # ---- build stage ----
-FROM node:20.11.1-alpine AS build
+FROM docker.io/library/node:20.11.1-alpine AS build
 
 WORKDIR /app
 

@@ -11,7 +11,7 @@
 # → pip install runtime+dev deps → done) so source edits don't bust
 # the large pip layer.
 
-FROM python:3.11-slim AS dev
+FROM docker.io/library/python:3.11-slim AS dev
 
 ENV PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \

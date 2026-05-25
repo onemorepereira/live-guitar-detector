@@ -34,7 +34,7 @@ FROM ${FRONTEND_IMAGE} AS frontend
 # Nothing to do; the export stage of the frontend image is just /dist.
 
 # ---------- python-build stage ----------
-FROM python:${PYTHON_VERSION}-slim AS python-build
+FROM docker.io/library/python:${PYTHON_VERSION}-slim AS python-build
 
 ENV PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
@@ -75,7 +75,7 @@ COPY app ./app
 RUN pip install --prefix=/install --no-deps .
 
 # ---------- runtime stage ----------
-FROM python:${PYTHON_VERSION}-slim AS runtime
+FROM docker.io/library/python:${PYTHON_VERSION}-slim AS runtime
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
