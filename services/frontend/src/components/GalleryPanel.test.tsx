@@ -31,7 +31,7 @@ describe("GalleryPanel", () => {
     expect(screen.getByText(/No guitars locked on/i)).toBeInTheDocument();
   });
 
-  it("renders one button per item with label + confidence", () => {
+  it("renders one row per item with label + confidence", () => {
     render(
       <GalleryPanel
         items={items}
@@ -44,7 +44,7 @@ describe("GalleryPanel", () => {
     expect(screen.getByText(/#1 · 85%/)).toBeInTheDocument();
   });
 
-  it("clicking an item calls onSelect with its track_id", () => {
+  it("clicking the select button calls onSelect with its track_id", () => {
     const onSelect = vi.fn();
     render(
       <GalleryPanel
@@ -53,16 +53,23 @@ describe("GalleryPanel", () => {
         onSelect={onSelect}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: /gibson les paul/i }));
+    // Each row now has two buttons (select + download). The select one
+    // owns the label text + aria-pressed; the download one is icon-only
+    // with aria-label "Download …".
+    fireEvent.click(
+      screen.getByRole("button", { name: /gibson les paul/i, pressed: false }),
+    );
     expect(onSelect).toHaveBeenCalledWith(1);
   });
 
-  it("clicking the highlighted item again clears the highlight", () => {
+  it("clicking the highlighted select button again clears the highlight", () => {
     const onSelect = vi.fn();
     render(
       <GalleryPanel items={items} highlightedTrackId={1} onSelect={onSelect} />,
     );
-    fireEvent.click(screen.getByRole("button", { name: /gibson les paul/i }));
+    fireEvent.click(
+      screen.getByRole("button", { name: /gibson les paul/i, pressed: true }),
+    );
     expect(onSelect).toHaveBeenCalledWith(null);
   });
 
@@ -71,10 +78,28 @@ describe("GalleryPanel", () => {
       <GalleryPanel items={items} highlightedTrackId={2} onSelect={() => {}} />,
     );
     expect(
-      screen.getByRole("button", { name: /fender strat/i }),
-    ).toHaveAttribute("aria-pressed", "true");
+      screen.getByRole("button", { name: /fender strat/i, pressed: true }),
+    ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: /gibson les paul/i }),
-    ).toHaveAttribute("aria-pressed", "false");
+      screen.getByRole("button", { name: /gibson les paul/i, pressed: false }),
+    ).toBeInTheDocument();
+  });
+
+  it("renders a per-row download button", () => {
+    render(
+      <GalleryPanel
+        items={items}
+        highlightedTrackId={null}
+        onSelect={() => {}}
+      />,
+    );
+    expect(
+      screen.getByRole("button", { name: /download gibson les paul crop/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", {
+        name: /download fender stratocaster crop/i,
+      }),
+    ).toBeInTheDocument();
   });
 });

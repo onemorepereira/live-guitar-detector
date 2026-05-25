@@ -86,32 +86,34 @@ function gibsonTrack(overrides: Partial<TrackDetection> = {}): TrackDetection {
 }
 
 describe("HUD", () => {
-  it("uses Gibson gold for a stable Gibson Les Paul track", () => {
+  // Colors are per-track-id (so multiple visible instruments get distinct
+  // colors). track_id=1 → palette index 1 → "#43AA8B"; track_id=2 → "#F94144".
+  it("uses the track-id palette color for a track", () => {
     render(<HUD tracks={[gibsonTrack()]} videoRect={rect} />);
     const strokeColors = stubCtx.calls
       .filter((c) => c.prop === "strokeStyle")
       .map((c) => c.value);
-    expect(strokeColors).toContain("#C8A45C");
+    expect(strokeColors).toContain("#43AA8B"); // palette[1]
   });
 
-  it("uses Fender white for a stable Fender track", () => {
-    const t = gibsonTrack({
-      label: { brand: "Fender", model: "Stratocaster", confidence: 0.9 },
-    });
-    render(<HUD tracks={[t]} videoRect={rect} />);
+  it("distinct track_ids get distinct palette colors", () => {
+    const t2 = gibsonTrack({ track_id: 2 });
+    render(<HUD tracks={[gibsonTrack(), t2]} videoRect={rect} />);
     const strokeColors = stubCtx.calls
       .filter((c) => c.prop === "strokeStyle")
-      .map((c) => c.value);
-    expect(strokeColors).toContain("#F5F5F5");
+      .map((c) => c.value as string);
+    expect(strokeColors).toContain("#43AA8B"); // palette[1]
+    expect(strokeColors).toContain("#F94144"); // palette[2]
   });
 
-  it("uses gray for an unstable / null-label track", () => {
+  it("renders a stroke (color independent of stable/label) for an unstable track", () => {
     const t = gibsonTrack({ stable: false, label: null });
     render(<HUD tracks={[t]} videoRect={rect} />);
     const strokeColors = stubCtx.calls
       .filter((c) => c.prop === "strokeStyle")
-      .map((c) => c.value);
-    expect(strokeColors).toContain("#888888");
+      .map((c) => c.value as string);
+    // Track-id palette is independent of label state — track_id=1 → palette[1].
+    expect(strokeColors).toContain("#43AA8B");
   });
 
   it("renders 'Analyzing…' text for stable=false", () => {
@@ -188,7 +190,8 @@ describe("HUD", () => {
     const shadowColors = stubCtx.calls
       .filter((c) => c.prop === "shadowColor")
       .map((c) => c.value as string);
-    expect(shadowColors).toContain("#C8A45C");
+    // Highlight shadow uses the same per-track palette color.
+    expect(shadowColors).toContain("#43AA8B");
     const shadowBlurs = stubCtx.calls
       .filter((c) => c.prop === "shadowBlur")
       .map((c) => c.value as number);
@@ -291,10 +294,12 @@ describe("HUD smoothing + hold", () => {
     expect(firstCall[0]).toBeCloseTo(96, 1);
     expect(firstCall[1]).toBeCloseTo(54, 1);
 
-    // New detection event: bbox jumps to [0.5, 0.5, 0.6, 0.6]. After ONE
-    // lerp step toward the new target (LERP_RATE = 0.35), x1 should be
-    // 0.1 + 0.35 * (0.5 - 0.1) = 0.24, i.e. 0.24 * 960 = 230.4 — strictly
-    // between the start (96) and the target (480).
+    // New detection event: bbox jumps to [0.5, 0.5, 0.6, 0.6]. The target
+    // is first EMA-blended toward the measurement (BBOX_EMA_ALPHA = 0.3):
+    //   target_x_norm = 0.7 * 0.1 + 0.3 * 0.5 = 0.22  (in px: 0.22*960 = 211.2)
+    // Then the rAF loop lerps the current toward that smoothed target
+    // (LERP_RATE = 0.35):
+    //   current_x_px = 96 + 0.35 * (211.2 - 96) ≈ 136.32
     const next = gibsonTrack({ bbox: [0.5, 0.5, 0.6, 0.6] });
     rerender(<HUD tracks={[next]} videoRect={rect} />);
     stepFrame(16); // one ~60 Hz frame later.
@@ -306,8 +311,8 @@ describe("HUD smoothing + hold", () => {
     expect(lerpedX).toBeLessThan(480);
     expect(lerpedY).toBeGreaterThan(54);
     expect(lerpedY).toBeLessThan(270);
-    // Sanity: the lerp step matches the configured LERP_RATE within float
-    // rounding. (Catches accidental swaps of source/target in the math.)
-    expect(lerpedX).toBeCloseTo(96 + 0.35 * (480 - 96), 1);
+    // Sanity: the smoothed step matches the EMA+LERP composition.
+    const emaTargetPx = (0.7 * 0.1 + 0.3 * 0.5) * 960;
+    expect(lerpedX).toBeCloseTo(96 + 0.35 * (emaTargetPx - 96), 1);
   });
 });

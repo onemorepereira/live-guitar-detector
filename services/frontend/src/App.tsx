@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createSession, deleteSession } from "./api/session";
 import { CameraPicker } from "./components/CameraPicker";
 import { DebugPanel } from "./components/DebugPanel";
+import { GalleryPanel } from "./components/GalleryPanel";
 import { VideoStage } from "./components/VideoStage";
 import { useCamera } from "./hooks/useCamera";
 import { useDetections } from "./hooks/useDetections";
@@ -120,9 +121,16 @@ export function App(): JSX.Element {
           >
             Stop
           </button>
-          {/* Gallery state is still maintained; the panel is intentionally
-              hidden in fullscreen mode. Adding a slide-out drawer is a
-              follow-up if it's missed. */}
+          {/* Captured crops, floating top-right over the video. */}
+          {gallery.items.length > 0 && (
+            <div className="fixed top-3 right-3 z-20 w-56 md:w-64 max-h-[60vh] overflow-y-auto rounded bg-zinc-950/80 backdrop-blur-sm shadow-lg">
+              <GalleryPanel
+                items={gallery.items}
+                highlightedTrackId={highlightedTrackId}
+                onSelect={setHighlightedTrackId}
+              />
+            </div>
+          )}
         </>
       )}
 

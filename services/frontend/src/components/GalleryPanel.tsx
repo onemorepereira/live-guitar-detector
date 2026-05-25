@@ -10,6 +10,18 @@ export interface GalleryPanelProps {
   onSelect: (trackId: number | null) => void;
 }
 
+function downloadItem(item: GalleryItem): void {
+  const safe = (s: string) =>
+    s.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
+  const name = `${safe(item.brand)}-${safe(item.model)}-track${item.track_id}-${item.capturedAt}.jpg`;
+  const a = document.createElement("a");
+  a.href = item.thumbnailDataUrl;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
 /**
  * Side panel listing every unique guitar sighting captured this session.
  * Pure presentational component — the parent owns both the items list
@@ -35,32 +47,44 @@ export function GalleryPanel({
       {items.map((item) => {
         const isHighlighted = item.track_id === highlightedTrackId;
         return (
-          <button
+          <div
             key={item.track_id}
-            type="button"
-            onClick={() => onSelect(isHighlighted ? null : item.track_id)}
             className={
-              "flex items-center gap-3 rounded p-2 text-left transition focus:outline-none focus:ring-2 focus:ring-amber-400 " +
+              "flex items-center gap-2 rounded p-2 transition " +
               (isHighlighted
                 ? "bg-amber-500/20 ring-1 ring-amber-400"
                 : "bg-zinc-900 hover:bg-zinc-800")
             }
-            aria-pressed={isHighlighted}
           >
-            <img
-              src={item.thumbnailDataUrl}
-              alt={`Track ${item.track_id}: ${item.brand} ${item.model}`}
-              className="h-12 w-16 object-cover rounded bg-black"
-            />
-            <div className="flex flex-col min-w-0">
-              <span className="text-sm font-medium truncate">
-                {item.brand} {item.model}
-              </span>
-              <span className="text-xs text-zinc-400">
-                #{item.track_id} · {Math.round(item.confidence * 100)}%
-              </span>
-            </div>
-          </button>
+            <button
+              type="button"
+              onClick={() => onSelect(isHighlighted ? null : item.track_id)}
+              className="flex items-center gap-3 flex-1 text-left focus:outline-none focus:ring-2 focus:ring-amber-400 rounded"
+              aria-pressed={isHighlighted}
+            >
+              <img
+                src={item.thumbnailDataUrl}
+                alt={`Track ${item.track_id}: ${item.brand} ${item.model}`}
+                className="h-12 w-16 object-cover rounded bg-black"
+              />
+              <div className="flex flex-col min-w-0">
+                <span className="text-sm font-medium truncate">
+                  {item.brand} {item.model}
+                </span>
+                <span className="text-xs text-zinc-400">
+                  #{item.track_id} · {Math.round(item.confidence * 100)}%
+                </span>
+              </div>
+            </button>
+            <button
+              type="button"
+              onClick={() => downloadItem(item)}
+              aria-label={`Download ${item.brand} ${item.model} crop`}
+              className="p-2 rounded text-zinc-300 hover:bg-zinc-700 focus:outline-none focus:ring-2 focus:ring-amber-400"
+            >
+              ⬇
+            </button>
+          </div>
         );
       })}
     </aside>

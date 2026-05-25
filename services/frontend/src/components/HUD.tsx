@@ -56,14 +56,24 @@ export interface HUDProps {
 }
 
 /**
- * Brand → stroke color. Values from DESIGN.md §5.6.
- * `Unknown` covers both the literal "Unknown" brand and any null-label track.
+ * Per-track-id stroke palette. Multiple instruments in frame get visually
+ * distinct boxes; the brand+model is still in the label text. Cycles via
+ * `track_id % length` so a single guitar stays the same color across frames.
  */
-const BRAND_COLOR: Record<string, string> = {
-  Gibson: "#C8A45C",
-  Fender: "#F5F5F5",
-  Unknown: "#888888",
-};
+const TRACK_PALETTE: string[] = [
+  "#F9C74F", // amber
+  "#43AA8B", // teal
+  "#F94144", // red
+  "#577590", // slate
+  "#F8961E", // orange
+  "#9D4EDD", // purple
+  "#06A77D", // emerald
+  "#FF6F91", // pink
+];
+
+function colorOfTrack(trackId: number): string {
+  return TRACK_PALETTE[Math.abs(trackId) % TRACK_PALETTE.length];
+}
 
 const LABEL_FONT = "bold 14px system-ui, sans-serif";
 const ANALYZING_FONT = "italic 14px system-ui, sans-serif";
@@ -97,6 +107,14 @@ const HOLD_MS = 150;
  * the box doesn't snap when a new detection event lands.
  */
 const LERP_RATE = 0.35;
+/**
+ * EMA blend factor applied to the *target* bbox on each detection event.
+ * Smooths YOLO's per-frame jitter so a handheld camera doesn't produce
+ * a buzzing box. Lower = smoother (more lag); higher = snappier (more
+ * jitter). 0.3 keeps the box visibly tracking motion while removing
+ * most of the high-frequency wobble.
+ */
+const BBOX_EMA_ALPHA = 0.3;
 
 type Bbox = [number, number, number, number];
 
@@ -149,7 +167,12 @@ export function HUD({
     for (const t of tracks) {
       const existing = state.get(t.track_id);
       if (existing) {
-        existing.targetBbox = [...t.bbox] as Bbox;
+        // EMA-blend the target so the lerp loop doesn't chase YOLO jitter.
+        for (let i = 0; i < 4; i++) {
+          existing.targetBbox[i] =
+            existing.targetBbox[i] * (1 - BBOX_EMA_ALPHA) +
+            t.bbox[i] * BBOX_EMA_ALPHA;
+        }
         existing.lastSeenAt = now;
         existing.detection = t;
       } else {
@@ -229,8 +252,7 @@ function drawTrack(
   highlighted: boolean,
 ): void {
   const [x1, y1, x2, y2] = denormalizeBbox(normalizedBbox, rect);
-  const brand = t.label?.brand ?? "Unknown";
-  const color = BRAND_COLOR[brand] ?? BRAND_COLOR.Unknown;
+  const color = colorOfTrack(t.track_id);
   const strokeWidth = highlighted ? HIGHLIGHT_STROKE_WIDTH : STROKE_WIDTH;
   const alpha = computeOpacity(t.age_frames);
 

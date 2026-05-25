@@ -19,9 +19,12 @@ export interface UseGalleryResult {
   clear: () => void;
 }
 
-const THUMBNAIL_W = 160;
-const THUMBNAIL_H = 120;
-const THUMBNAIL_QUALITY = 0.85;
+// Max thumbnail dimension. The actual aspect ratio comes from the bbox
+// crop — boxes are usually portrait for guitars, so we cap the long edge
+// and let the short edge scale. Quality of 0.92 keeps faces and inlays
+// recognizable in screenshots without blowing up data-URL size.
+const THUMBNAIL_MAX = 320;
+const THUMBNAIL_QUALITY = 0.92;
 
 /**
  * In-memory session gallery of unique guitar sightings.
@@ -45,7 +48,7 @@ export function useGallery(): UseGalleryResult {
       for (const t of tracks) {
         if (!t.stable || t.label === null) continue;
         if (seen.has(t.track_id)) continue;
-        const thumb = captureThumbnail(video, canvasRef);
+        const thumb = captureThumbnail(video, canvasRef, t.bbox);
         if (thumb === null) continue;
         seen.add(t.track_id);
         newItems.push({
@@ -75,21 +78,32 @@ export function useGallery(): UseGalleryResult {
 function captureThumbnail(
   video: HTMLVideoElement,
   canvasRef: React.MutableRefObject<HTMLCanvasElement | null>,
+  bbox: [number, number, number, number],
 ): string | null {
+  // Translate the normalized [0..1] bbox into source-pixel coordinates.
+  const vw = video.videoWidth;
+  const vh = video.videoHeight;
+  const sx = Math.max(0, Math.floor(bbox[0] * vw));
+  const sy = Math.max(0, Math.floor(bbox[1] * vh));
+  const sw = Math.max(1, Math.floor((bbox[2] - bbox[0]) * vw));
+  const sh = Math.max(1, Math.floor((bbox[3] - bbox[1]) * vh));
+
+  // Scale so the long edge fits THUMBNAIL_MAX while preserving aspect.
+  const scale = Math.min(1, THUMBNAIL_MAX / Math.max(sw, sh));
+  const dw = Math.max(1, Math.round(sw * scale));
+  const dh = Math.max(1, Math.round(sh * scale));
+
   let canvas = canvasRef.current;
   if (!canvas) {
     canvas = document.createElement("canvas");
-    canvas.width = THUMBNAIL_W;
-    canvas.height = THUMBNAIL_H;
     canvasRef.current = canvas;
   }
+  canvas.width = dw;
+  canvas.height = dh;
   const ctx = canvas.getContext("2d");
   if (!ctx) return null;
   try {
-    // Cover the canvas with the video frame, preserving aspect ratio via
-    // a basic letterbox/pillarbox crop. For thumbnails this is fine even
-    // if we lose a few pixels at the edges.
-    ctx.drawImage(video, 0, 0, THUMBNAIL_W, THUMBNAIL_H);
+    ctx.drawImage(video, sx, sy, sw, sh, 0, 0, dw, dh);
     return canvas.toDataURL("image/jpeg", THUMBNAIL_QUALITY);
   } catch {
     // taintedCanvas on cross-origin video; tolerate without crashing.
