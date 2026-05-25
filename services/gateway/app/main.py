@@ -210,6 +210,18 @@ async def readyz(response: Response) -> dict:
 # index.html and unknown sub-paths fall back to index.html so client-
 # side routing works.
 # ---------------------------------------------------------------------------
-_STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
-if _STATIC_DIR.is_dir():
+# The prod Dockerfile COPYs the SPA to /app/static; the __file__-relative
+# fallback covers editable installs (dev). First existing path wins.
+_STATIC_DIR = next(
+    (
+        p
+        for p in (
+            Path("/app/static"),
+            Path(__file__).resolve().parent.parent / "static",
+        )
+        if p.is_dir()
+    ),
+    None,
+)
+if _STATIC_DIR is not None:
     app.mount("/", StaticFiles(directory=str(_STATIC_DIR), html=True), name="static")
