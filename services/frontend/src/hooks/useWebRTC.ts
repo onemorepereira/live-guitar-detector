@@ -70,6 +70,28 @@ export function useWebRTC(
         }
         const offer = await peer.createOffer();
         await peer.setLocalDescription(offer);
+        // Wait for ICE gathering to complete so the offer carries all
+        // candidates in one shot (trickle ICE would require WS-side
+        // candidate exchange, which we don't implement). aiortc on the
+        // server already waits for gathering before producing the answer.
+        const pc = peer;
+        if (pc.iceGatheringState !== "complete") {
+          await new Promise<void>((resolve) => {
+            const onChange = () => {
+              if (pc.iceGatheringState === "complete") {
+                pc.removeEventListener("icegatheringstatechange", onChange);
+                resolve();
+              }
+            };
+            pc.addEventListener("icegatheringstatechange", onChange);
+            // Safety cap: even if gathering stalls, send what we have
+            // after 5s. Better a degraded connection than no connection.
+            setTimeout(() => {
+              pc.removeEventListener("icegatheringstatechange", onChange);
+              resolve();
+            }, 5000);
+          });
+        }
         if (cancelled) return;
         const answer = await postOffer({
           session_id: sessionId,

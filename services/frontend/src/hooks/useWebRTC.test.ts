@@ -5,6 +5,9 @@ import { useWebRTC } from "./useWebRTC";
 
 class FakeRTCPeerConnection {
   iceConnectionState: string = "new";
+  // Pretend gathering finished synchronously; the production code skips
+  // the wait when this is already "complete".
+  iceGatheringState: string = "complete";
   localDescription: RTCSessionDescription | null = null;
   remoteDescription: RTCSessionDescription | null = null;
   addTrack = vi.fn();
