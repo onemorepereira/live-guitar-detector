@@ -29,7 +29,12 @@ from dataclasses import dataclass
 
 import cv2
 import redis.asyncio as redis_async
-from aiortc import RTCPeerConnection, RTCSessionDescription
+from aiortc import (
+    RTCConfiguration,
+    RTCIceServer,
+    RTCPeerConnection,
+    RTCSessionDescription,
+)
 from aiortc.contrib.media import MediaBlackhole
 from loguru import logger
 
@@ -65,6 +70,27 @@ def _should_drop(entry: _PeerEntry, now_ms: int, min_interval_ms: int) -> bool:
     from starving.
     """
     return now_ms - entry.last_publish_ms < min_interval_ms
+
+
+def _build_ice_config(settings: Settings) -> RTCConfiguration | None:
+    """Construct an :class:`RTCConfiguration` from TURN_* settings.
+
+    Returns ``None`` when no TURN URL is configured so aiortc falls back
+    to its default (no ICE servers). When TURN is set, the same server
+    list is exposed to the browser via ``GET /api/config`` so both ends
+    of the call use the relay.
+    """
+    if not settings.TURN_URL:
+        return None
+    return RTCConfiguration(
+        iceServers=[
+            RTCIceServer(
+                urls=[settings.TURN_URL],
+                username=settings.TURN_USERNAME or None,
+                credential=settings.TURN_PASSWORD or None,
+            )
+        ]
+    )
 
 
 class WebRTCManager:
@@ -108,7 +134,7 @@ class WebRTCManager:
         if session_id in self._peers:
             await self.close(session_id)
 
-        peer = RTCPeerConnection()
+        peer = RTCPeerConnection(configuration=_build_ice_config(self._settings))
         entry = _PeerEntry(peer=peer)
         self._peers[session_id] = entry
 

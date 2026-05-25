@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import { fetchConfig } from "../api/config";
 import { postOffer } from "../api/webrtc";
 
 export type WebRTCState =
@@ -41,11 +42,11 @@ export function useWebRTC(
     }
 
     let cancelled = false;
-    const peer = new RTCPeerConnection();
+    let peer: RTCPeerConnection | null = null;
 
     const onIce = () => {
+      if (!peer || cancelled) return;
       const ice = peer.iceConnectionState;
-      if (cancelled) return;
       if (ice === "connected" || ice === "completed") {
         setState("connected");
       } else if (ice === "failed" || ice === "disconnected") {
@@ -55,12 +56,15 @@ export function useWebRTC(
         setState("closed");
       }
     };
-    peer.addEventListener("iceconnectionstatechange", onIce);
 
     setState("connecting");
     setError(null);
     void (async () => {
       try {
+        const cfg = await fetchConfig();
+        if (cancelled) return;
+        peer = new RTCPeerConnection({ iceServers: cfg.iceServers });
+        peer.addEventListener("iceconnectionstatechange", onIce);
         for (const track of stream.getTracks()) {
           peer.addTrack(track, stream);
         }
@@ -86,11 +90,13 @@ export function useWebRTC(
 
     return () => {
       cancelled = true;
-      peer.removeEventListener("iceconnectionstatechange", onIce);
-      try {
-        peer.close();
-      } catch {
-        // ignore
+      if (peer) {
+        peer.removeEventListener("iceconnectionstatechange", onIce);
+        try {
+          peer.close();
+        } catch {
+          // ignore
+        }
       }
     };
   }, [stream, sessionId]);

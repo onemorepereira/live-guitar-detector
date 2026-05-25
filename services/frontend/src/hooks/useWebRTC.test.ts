@@ -34,15 +34,23 @@ beforeEach(() => {
     "RTCPeerConnection",
     FakeRTCPeerConnection as unknown as typeof RTCPeerConnection,
   );
+  // The hook makes two fetches per negotiation: /api/config then
+  // /api/webrtc/offer. Route by URL.
   vi.stubGlobal(
     "fetch",
-    vi.fn(
-      async () =>
-        new Response(JSON.stringify({ sdp: "v=0\nanswer", type: "answer" }), {
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.endsWith("/api/config")) {
+        return new Response(JSON.stringify({ iceServers: [] }), {
           status: 200,
           headers: { "Content-Type": "application/json" },
-        }),
-    ),
+        });
+      }
+      return new Response(
+        JSON.stringify({ sdp: "v=0\nanswer", type: "answer" }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }),
   );
 });
 
@@ -79,10 +87,19 @@ describe("useWebRTC", () => {
   });
 
   it("sets state=failed on offer rejection", async () => {
-    // Override fetch to 404 for this test.
+    // Config succeeds; offer 404s.
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => new Response("not found", { status: 404 })),
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url.endsWith("/api/config")) {
+          return new Response(JSON.stringify({ iceServers: [] }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response("not found", { status: 404 });
+      }),
     );
     const stream = fakeStream();
     const { result } = renderHook(() => useWebRTC(stream, "s1"));

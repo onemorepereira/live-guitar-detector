@@ -118,6 +118,24 @@ app = FastAPI(lifespan=lifespan)
 api = APIRouter(prefix="/api")
 
 
+@api.get("/config")
+async def config(request: Request) -> dict:
+    """Return browser-consumable config. Currently just ICE servers so
+    the client's RTCPeerConnection uses the same TURN relay we do."""
+    s: Settings = request.app.state.settings
+    if not s.TURN_URL:
+        return {"iceServers": []}
+    return {
+        "iceServers": [
+            {
+                "urls": [s.TURN_URL],
+                "username": s.TURN_USERNAME,
+                "credential": s.TURN_PASSWORD,
+            }
+        ]
+    }
+
+
 @api.post("/session", response_model=SessionCreateResponse, status_code=200)
 async def create_session(body: SessionCreateRequest, request: Request) -> SessionCreateResponse:
     """Create a new session. 409 if the id is already live."""

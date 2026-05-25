@@ -30,4 +30,13 @@ class Settings(BaseSettings):
     # Logging
     LOG_LEVEL: str = "INFO"
 
+    # TURN relay (optional). When TURN_URL is set, both the gateway's
+    # aiortc peer and the browser's RTCPeerConnection use this relay so
+    # WebRTC media can punch through the K8s pod-network from a LAN
+    # client. Leave empty to disable (works only when the client can
+    # directly reach the gateway's interface IP).
+    TURN_URL: str = ""
+    TURN_USERNAME: str = ""
+    TURN_PASSWORD: str = ""
+
     model_config = SettingsConfigDict(env_file=".env", env_prefix="")
