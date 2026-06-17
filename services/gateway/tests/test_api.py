@@ -100,7 +100,7 @@ async def test_create_session_empty_body_returns_422(client_with_fakeredis) -> N
 async def test_create_session_empty_session_id_returns_422(
     client_with_fakeredis,
 ) -> None:
-    """Empty-string ``session_id`` violates the ``NonEmptyStr`` constraint."""
+    """Empty-string ``session_id`` violates the ``SessionId`` min-length constraint."""
     ac, *_ = client_with_fakeredis
     resp = await ac.post("/api/session", json={"session_id": ""})
     assert resp.status_code == 422
@@ -161,7 +161,7 @@ async def test_webrtc_offer_invalid_type_returns_422(
 
 
 async def test_webrtc_offer_empty_sdp_returns_422(client_with_fakeredis) -> None:
-    """Empty SDP violates the ``NonEmptyStr`` constraint on ``sdp``."""
+    """Empty SDP violates the ``Sdp`` min-length constraint."""
     ac, *_ = client_with_fakeredis
     sid = str(uuid.uuid4())
     await ac.post("/api/session", json={"session_id": sid})
