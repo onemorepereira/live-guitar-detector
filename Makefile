@@ -5,9 +5,9 @@
 TAG ?= 0.1.0
 
 # Container registry images are pushed to. Cluster default is the in-cluster
-# registry exposed at registry.home.devoops.co. Override per-target with
+# registry exposed at registry.home.lan. Override per-target with
 # `make push-images REGISTRY=ghcr.io/me`.
-REGISTRY ?= registry.home.devoops.co
+REGISTRY ?= registry.home.lan
 
 # Container runtime detection.
 #

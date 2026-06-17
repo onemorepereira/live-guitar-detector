@@ -16,7 +16,7 @@ guitar-detect` to force).
 # 1. Build + push images to the in-cluster registry
 make build-images TAG=0.1.0
 make push-images  TAG=0.1.0
-# REGISTRY defaults to registry.home.devoops.co; override with
+# REGISTRY defaults to registry.home.lan; override with
 #   make push-images REGISTRY=ghcr.io/me TAG=0.1.0
 
 # 2. Train the SigLIP probe locally if you don't have one yet
@@ -38,7 +38,7 @@ git push
 # 5. Wait for reconciliation (or force it)
 flux reconcile kustomization guitar-detect
 
-# 6. Open https://guitars.home.devoops.co on a phone or desktop.
+# 6. Open https://guitars.home.lan on a phone or desktop.
 ```
 
 ## Upgrade
@@ -104,16 +104,16 @@ under `spec.values`. Common keys:
 | Key                                 | Default                    | Override when                                                                                               |
 | ----------------------------------- | -------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | `image.tag`                         | `0.1.0`                    | Bumping releases                                                                                            |
-| `image.registry`                    | `registry.home.devoops.co` | Using a different registry                                                                                  |
+| `image.registry`                    | `registry.home.lan`        | Using a different registry                                                                                  |
 | `redis.image`                       | `redis:7-alpine`           | Pinning a specific Redis patch                                                                              |
-| `ingress.host`                      | `guitars.home.devoops.co`  | Using a different hostname                                                                                  |
+| `ingress.host`                      | `guitars.home.lan`         | Using a different hostname                                                                                  |
 | `ingress.tls.issuer`                | `letsencrypt-prod`         | Using a different cert-manager ClusterIssuer                                                                |
 | `inference.replicas`                | `1`                        | (Future) horizontal scaling                                                                                 |
 | `inference.env.CLASSIFIER_MODE`     | `siglip_probe`             | Falling back to `zero_shot` or `probe`                                                                      |
 | `inference.env.DETECT_CONF`         | `0.35`                     | Lower → more sensitive YOLO (catches more borderline frames; more spurious dets — ByteTrack's vote absorbs) |
 | `inference.probe.enabled`           | `true`                     | Deploying without a probe (e.g. zero-shot mode)                                                             |
 | `coturn.enabled`                    | `true`                     | Disable only if you have a different TURN relay or your phones can reach the gateway directly (rare in K8s) |
-| `coturn.loadBalancerIP`             | `192.168.86.7`             | A free IP in your MetalLB pool. coturn's `external-ip` is baked from this so the values MUST match.         |
+| `coturn.loadBalancerIP`             | `192.168.1.240`            | A free IP in your MetalLB pool. coturn's `external-ip` is baked from this so the values MUST match.         |
 | `coturn.username`/`coturn.password` | `guitar`/`change-me`       | LAN-only credentials. Override via `helmrelease.yml` `spec.values`. SOPS-encrypt if the repo isn't private. |
 | `networkPolicies.enabled`           | `true`                     | Disabling for debugging                                                                                     |
 | `networkPolicies.traefikNamespace`  | `kube-system`              | Upstream Traefik install in a dedicated namespace                                                           |
