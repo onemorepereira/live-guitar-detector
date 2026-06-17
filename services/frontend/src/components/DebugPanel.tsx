@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import type { WSState } from "../hooks/useDetections";
 
@@ -15,10 +15,13 @@ export interface DebugPanelProps {
  * Strictly informational — never mutates state.
  */
 export function DebugPanel(props: DebugPanelProps): JSX.Element | null {
-  const [enabled, setEnabled] = useState(false);
-  useEffect(() => {
-    setEnabled(new URLSearchParams(window.location.search).has("debug"));
-  }, []);
+  // Read the flag once at mount via lazy initializer — the URL doesn't change
+  // without a navigation, and computing it during render (instead of in an
+  // effect) means the panel is present on first paint with ?debug=1 rather
+  // than flashing in a frame later.
+  const [enabled] = useState(() =>
+    new URLSearchParams(window.location.search).has("debug"),
+  );
   if (!enabled) return null;
 
   return (

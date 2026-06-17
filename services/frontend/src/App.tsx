@@ -31,11 +31,15 @@ export function App(): JSX.Element {
   const metrics = useMetrics(detections.event);
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
-  // When detection events arrive, observe for gallery capture.
+  // When detection events arrive, observe for gallery capture. Depend on the
+  // stable `observe` (useCallback([])) rather than the whole `gallery` object,
+  // whose identity changes on every capture — otherwise each capture re-runs
+  // this effect against the same (stale) detection event.
+  const { observe: observeGallery, clear: clearGallery } = gallery;
   useEffect(() => {
     if (!detections.event) return;
-    gallery.observe(detections.event.tracks, videoRef.current);
-  }, [detections.event, gallery]);
+    observeGallery(detections.event.tracks, videoRef.current);
+  }, [detections.event, observeGallery]);
 
   const handleStart = useCallback(async () => {
     if (!camera.stream || !camera.selected) {
@@ -64,7 +68,7 @@ export function App(): JSX.Element {
     setPhase("idle");
     setSessionId(null);
     setHighlightedTrackId(null);
-    gallery.clear();
+    clearGallery();
     if (sid) {
       try {
         await deleteSession(sid);
@@ -72,15 +76,15 @@ export function App(): JSX.Element {
         // Best-effort; the server has an idle-sweep that will clean up.
       }
     }
-  }, [sessionId, gallery]);
+  }, [sessionId, clearGallery]);
 
   const handleReset = useCallback(() => {
     setAppError(null);
     setPhase("idle");
     setSessionId(null);
     setHighlightedTrackId(null);
-    gallery.clear();
-  }, [gallery]);
+    clearGallery();
+  }, [clearGallery]);
 
   const handleVideoReady = useCallback((el: HTMLVideoElement | null) => {
     videoRef.current = el;
@@ -96,7 +100,7 @@ export function App(): JSX.Element {
       </header>
 
       {phase === "idle" && (
-        <CameraPicker camera={camera} onStart={handleStart} starting={false} />
+        <CameraPicker camera={camera} onStart={handleStart} />
       )}
 
       {phase === "starting" && (

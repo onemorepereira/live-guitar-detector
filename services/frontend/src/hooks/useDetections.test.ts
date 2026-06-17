@@ -167,6 +167,9 @@ describe("useDetections", () => {
     expect(instances[0].send).toHaveBeenCalledWith(
       JSON.stringify({ type: "ping" }),
     );
+    // Reply with a pong so the connection stays healthy and isn't force-closed
+    // for a missed pong before the next ping interval.
+    act(() => instances[0].receive({ type: "pong" }));
 
     act(() => {
       vi.advanceTimersByTime(5000);
@@ -204,6 +207,48 @@ describe("useDetections", () => {
     // No warn from THIS ping cycle (a new pong-timeout was set by the latest ping).
     // The exact count is sensitive to fake-timer ordering — just check warn wasn't called from the pong-clear branch.
     expect(warn).toHaveBeenCalledTimes(0);
+  });
+
+  it("closes the socket when no pong arrives within 3s of ping", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    renderHook(() => useDetections("abc"));
+    act(() => instances[0].open());
+    act(() => {
+      vi.advanceTimersByTime(5000); // first ping
+    });
+    expect(instances[0].close).not.toHaveBeenCalled();
+    act(() => {
+      vi.advanceTimersByTime(3000); // pong timeout
+    });
+    // A half-open socket must be recycled, not just warned about — closing it
+    // drives the reconnect path.
+    expect(instances[0].close).toHaveBeenCalled();
+  });
+
+  it("does not reconnect when the server closes with code 1008 (session gone)", () => {
+    vi.useFakeTimers();
+    renderHook(() => useDetections("abc"));
+    expect(instances.length).toBe(1);
+    act(() => instances[0].open());
+    // 1008 = policy violation; the gateway uses it when the session no longer
+    // exists. Retrying would hammer a dead session forever.
+    act(() => instances[0].dispatchEvent("close", { code: 1008 }));
+    act(() => {
+      vi.advanceTimersByTime(10000);
+    });
+    expect(instances.length).toBe(1);
+  });
+
+  it("does not reconnect on a normal close (code 1000)", () => {
+    vi.useFakeTimers();
+    renderHook(() => useDetections("abc"));
+    act(() => instances[0].open());
+    act(() => instances[0].dispatchEvent("close", { code: 1000 }));
+    act(() => {
+      vi.advanceTimersByTime(10000);
+    });
+    expect(instances.length).toBe(1);
   });
 
   it("closes the socket on unmount", () => {
