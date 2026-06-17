@@ -28,7 +28,7 @@ from app.models import (
     WebRTCAnswerResponse,
     WebRTCOfferRequest,
 )
-from app.session import SessionAlreadyExists, SessionManager
+from app.session import SessionAlreadyExists, SessionLimitReached, SessionManager
 from app.webrtc import WebRTCManager
 from app.websocket import forward_detections
 
@@ -69,7 +69,9 @@ async def lifespan(app: FastAPI):
     settings = Settings()
     app.state.settings = settings
     app.state.redis = redis_async.from_url(settings.REDIS_URL, decode_responses=False)
-    app.state.session_manager = SessionManager(app.state.redis)
+    app.state.session_manager = SessionManager(
+        app.state.redis, max_active_sessions=settings.MAX_ACTIVE_SESSIONS
+    )
     app.state.webrtc_manager = WebRTCManager(
         r=app.state.redis,
         settings=settings,
@@ -109,6 +111,9 @@ async def lifespan(app: FastAPI):
         sweep_task.cancel()
         with suppress(asyncio.CancelledError):
             await sweep_task
+        # Close outstanding peer connections (and their ingest tasks) before
+        # dropping Redis, so aiortc transports shut down cleanly.
+        await app.state.webrtc_manager.close_all()
         await app.state.redis.aclose()
         logger.info("gateway shutting down")
 
@@ -146,6 +151,11 @@ async def create_session(body: SessionCreateRequest, request: Request) -> Sessio
         raise HTTPException(
             status_code=409,
             detail=f"session {body.session_id} already exists",
+        ) from exc
+    except SessionLimitReached as exc:
+        raise HTTPException(
+            status_code=429,
+            detail="active session limit reached; stop the current session first",
         ) from exc
     return SessionCreateResponse(ok=True)
 
@@ -198,14 +208,14 @@ async def healthz() -> dict:
 
 
 @app.get("/readyz")
-async def readyz(response: Response) -> dict:
+async def readyz(request: Request, response: Response) -> dict:
     """Readiness probe — gateway can reach its Redis dependency.
 
     Returns 503 if `redis.ping()` raises so an orchestrator can hold
     traffic off until the dependency recovers.
     """
     try:
-        await app.state.redis.ping()
+        await request.app.state.redis.ping()
         return {"ok": True}
     except Exception as e:
         response.status_code = 503

@@ -3,22 +3,22 @@ import type { UseCameraResult } from "../hooks/useCamera";
 export interface CameraPickerProps {
   camera: UseCameraResult;
   onStart: () => void;
-  starting?: boolean;
 }
 
 /**
  * Camera dropdown + Start button. Stateless — selection lives in `useCamera`,
- * onStart fires the parent's session-create flow.
+ * onStart fires the parent's session-create flow. The parent swaps this whole
+ * component out for a "Starting…" view once a session is being created, so
+ * there's no in-flight state to track here.
  */
 export function CameraPicker({
   camera,
   onStart,
-  starting,
 }: CameraPickerProps): JSX.Element {
   // Stream must be live before Start so we don't kick off a session against
   // a camera that hasn't actually attached. `selected` alone isn't enough —
   // getUserMedia may still be in flight.
-  const canStart = !!camera.selected && !!camera.stream && !starting;
+  const canStart = !!camera.selected && !!camera.stream;
   return (
     <div className="flex flex-col gap-3 max-w-md">
       <label className="flex flex-col gap-1 text-sm">
@@ -52,7 +52,7 @@ export function CameraPicker({
         disabled={!canStart}
         className="rounded bg-amber-500 hover:bg-amber-400 disabled:bg-zinc-700 disabled:text-zinc-400 px-4 py-2 font-semibold text-zinc-900 transition"
       >
-        {starting ? "Starting…" : "Start"}
+        Start
       </button>
     </div>
   );

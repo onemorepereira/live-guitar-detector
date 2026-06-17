@@ -27,10 +27,12 @@ const BACKOFF_CAP_MS = 5000;
  *    fills in the protocol and host).
  *  - Only the most recent event is exposed — we never queue stale frames
  *    since the UI redraws at canvas frame rate.
- *  - On close (other than a caller-initiated unmount / sessionId change),
- *    reconnects with exponential backoff: 1s, 2s, 4s, then capped at 5s.
- *  - Every 5 seconds while open, sends `{"type":"ping"}`. If no pong
- *    arrives within 3 seconds of the latest ping, logs a console.warn.
+ *  - On close, reconnects with exponential backoff (1s, 2s, 4s, capped at
+ *    5s) — except terminal closes (4404 session-not-found, 1000 normal, 1008
+ *    policy) and a caller-initiated unmount / sessionId change.
+ *  - Every 5 seconds while open, sends `{"type":"ping"}`. If no pong arrives
+ *    within 3 seconds, the socket is force-closed (it's half-open) so the
+ *    close handler can reconnect.
  *  - Inbound `{"type":"pong"}` messages clear the pong timeout and do
  *    not replace the exposed event.
  */
@@ -66,7 +68,12 @@ export function useDetections(sessionId: string | null): UseDetectionsResult {
       socket.send(JSON.stringify({ type: "ping" }));
       if (pongTimeout) clearTimeout(pongTimeout);
       pongTimeout = setTimeout(() => {
-        console.warn("ws: no pong within 3s of ping");
+        console.warn("ws: no pong within 3s of ping — closing dead socket");
+        // A missed pong means the connection is half-open (common on mobile
+        // network handoff): still `state:"open"` but receiving nothing and
+        // never firing `close`. Force-close it so the close handler runs the
+        // reconnect path instead of leaving the stream silently dead.
+        if (socket) socket.close();
       }, PONG_TIMEOUT_MS);
     };
 
@@ -105,13 +112,21 @@ export function useDetections(sessionId: string | null): UseDetectionsResult {
         }
       });
 
-      socket.addEventListener("close", () => {
+      socket.addEventListener("close", (ev) => {
         if (cancelled) return;
         setState("closed");
         if (pingInterval) clearInterval(pingInterval);
         if (pongTimeout) clearTimeout(pongTimeout);
         pingInterval = null;
         pongTimeout = null;
+        // Terminal closes — the session is gone server-side, so reconnecting
+        // would just hammer a dead session forever:
+        //   4404 = gateway's "session not found" (ws_route, the real signal)
+        //   1000 = normal closure, 1008 = policy violation
+        // Any other code (or an abnormal drop with no code: 1006/1005) is
+        // recoverable and triggers backoff reconnect.
+        const code = (ev as CloseEvent).code;
+        if (code === 4404 || code === 1000 || code === 1008) return;
         // Reconnect with exponential backoff.
         const delay = Math.min(BACKOFF_BASE_MS * 2 ** attempt, BACKOFF_CAP_MS);
         attempt += 1;

@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     MAX_INGEST_FPS: int = Field(30, ge=1, le=120)
     JPEG_QUALITY: int = Field(75, ge=1, le=100)
     SESSION_IDLE_TIMEOUT_S: int = Field(10, ge=1)
+    # Cap on simultaneously-active sessions. The inference worker shares one
+    # ByteTrack tracker across sessions, so concurrent sessions corrupt each
+    # other's tracks; default to 1 until that's isolated per-session.
+    MAX_ACTIVE_SESSIONS: int = Field(1, ge=1)
 
     # Logging
     LOG_LEVEL: str = "INFO"

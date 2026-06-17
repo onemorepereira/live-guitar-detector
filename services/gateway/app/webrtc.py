@@ -213,6 +213,16 @@ class WebRTCManager:
         except Exception as exc:
             logger.warning("error closing peer for session={}: {}", session_id, exc)
 
+    async def close_all(self) -> None:
+        """Close every live peer. Used by the app-shutdown path.
+
+        Like :meth:`close`, this does NOT fire ``on_close`` — the process is
+        going away, so there's no session state worth reconciling in Redis.
+        Iterates a snapshot of the keys since :meth:`close` mutates ``_peers``.
+        """
+        for session_id in list(self._peers):
+            await self.close(session_id)
+
     async def _teardown(self, session_id: str) -> None:
         """Close the peer and notify the caller's ``on_close`` hook.
 

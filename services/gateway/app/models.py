@@ -10,14 +10,21 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, StringConstraints
 
-NonEmptyStr = Annotated[str, StringConstraints(min_length=1, strip_whitespace=True)]
+# Session ids are client-chosen (typically a UUID); 256 chars is a generous
+# bound that rejects abuse while accommodating any sane identifier scheme.
+SessionId = Annotated[str, StringConstraints(min_length=1, max_length=256, strip_whitespace=True)]
+
+# Real WebRTC offers are a few KB even with a full ICE candidate list. Cap the
+# body at 64 KB so the unauthenticated offer endpoint can't hand an arbitrarily
+# large blob to aiortc's SDP parser.
+Sdp = Annotated[str, StringConstraints(min_length=1, max_length=64_000)]
 
 
 class SessionCreateRequest(BaseModel):
     """Body for ``POST /api/session``."""
 
     model_config = ConfigDict(extra="forbid")
-    session_id: NonEmptyStr
+    session_id: SessionId
 
 
 class SessionCreateResponse(BaseModel):
@@ -30,8 +37,8 @@ class WebRTCOfferRequest(BaseModel):
     """Body for ``POST /api/webrtc/offer``."""
 
     model_config = ConfigDict(extra="forbid")
-    session_id: NonEmptyStr
-    sdp: NonEmptyStr
+    session_id: SessionId
+    sdp: Sdp
     type: Literal["offer"]
 
 

@@ -16,7 +16,7 @@ import fakeredis.aioredis
 import pytest
 import pytest_asyncio
 
-from app.session import SessionAlreadyExists, SessionManager
+from app.session import SessionAlreadyExists, SessionLimitReached, SessionManager
 
 
 @pytest_asyncio.fixture
@@ -85,6 +85,67 @@ async def test_touch_updates_last_frame_ts(manager: SessionManager) -> None:
     assert raw is not None
     data = json.loads(raw)
     assert data["last_frame_ts"] == 999_999_999
+
+
+async def test_create_rejects_when_at_active_session_cap() -> None:
+    """With ``max_active_sessions`` set, a create beyond the cap is rejected.
+
+    The worker shares one ByteTrack tracker across sessions, so two concurrent
+    sessions corrupt each other's tracks. The gateway caps active sessions to
+    keep that from happening.
+    """
+    r = fakeredis.aioredis.FakeRedis()
+    try:
+        mgr = SessionManager(r, max_active_sessions=1)
+        await mgr.create("first")
+        with pytest.raises(SessionLimitReached):
+            await mgr.create("second")
+        # After the first is gone, a new session fits again.
+        await mgr.delete("first")
+        await mgr.create("third")
+    finally:
+        await r.aclose()
+
+
+async def test_create_unlimited_by_default() -> None:
+    """No cap configured → any number of sessions can be created."""
+    r = fakeredis.aioredis.FakeRedis()
+    try:
+        mgr = SessionManager(r)  # no max_active_sessions
+        await mgr.create("a")
+        await mgr.create("b")
+        await mgr.create("c")
+        assert await mgr.exists("c")
+    finally:
+        await r.aclose()
+
+
+async def test_touch_does_not_resurrect_concurrently_deleted_session(
+    manager: SessionManager,
+) -> None:
+    """A delete landing between touch()'s GET and SET must not recreate the key.
+
+    Otherwise we leak a ``session:`` key that is no longer in ``sessions:active``
+    — a zombie the idle sweep can never reap.
+    """
+    sid = "racy"
+    await manager.create(sid)
+
+    real_get = manager._r.get
+
+    async def get_then_delete(key: str):
+        # Read the live value, then simulate a concurrent teardown landing
+        # before touch() issues its SET.
+        raw = await real_get(key)
+        await manager.delete(sid)
+        return raw
+
+    with patch.object(manager._r, "get", side_effect=get_then_delete):
+        await manager.touch(sid)
+
+    assert not await manager.exists(sid)
+    members = await manager._r.smembers(SessionManager.ACTIVE_SET)
+    assert all(m.decode() != sid for m in members)
 
 
 async def test_idle_sessions_returns_old_ones(manager: SessionManager) -> None:

@@ -155,6 +155,9 @@ async def _run_consumer(settings: Settings) -> int:
         return 1
 
     print(f"loading models from {models_dir}", flush=True)
+    # NOTE: the detector loads YOLO via Ultralytics, which owns its own
+    # OpenVINO backend — OPENVINO_DEVICE / OPENVINO_THREADS only reach the
+    # CLIP/probe classifiers below, not this model.
     detector = Detector(
         models_dir / "yolov8n-oiv7-fp32",
         conf=settings.DETECT_CONF,
@@ -175,7 +178,13 @@ async def _run_consumer(settings: Settings) -> int:
             )
             return 1
         print(f"loading probe head from {probe_path}", flush=True)
-        classifier = ProbeClassifier(models_dir, probe_path, input_size=settings.CLIP_INPUT_SIZE)
+        classifier = ProbeClassifier(
+            models_dir,
+            probe_path,
+            input_size=settings.CLIP_INPUT_SIZE,
+            device=settings.OPENVINO_DEVICE,
+            num_threads=settings.OPENVINO_THREADS,
+        )
     elif settings.CLASSIFIER_MODE == "siglip_probe":
         from app.siglip_probe_classifier import SigLIPProbeClassifier
 
@@ -197,7 +206,13 @@ async def _run_consumer(settings: Settings) -> int:
     else:
         print(f"loading prompts from {prompts_path}", flush=True)
         prompts = load_prompts(prompts_path)
-        classifier = Classifier(models_dir, prompts, input_size=settings.CLIP_INPUT_SIZE)
+        classifier = Classifier(
+            models_dir,
+            prompts,
+            input_size=settings.CLIP_INPUT_SIZE,
+            device=settings.OPENVINO_DEVICE,
+            num_threads=settings.OPENVINO_THREADS,
+        )
 
     pipeline = Pipeline(detector, classifier, settings)
 
@@ -217,7 +232,7 @@ async def _run_consumer(settings: Settings) -> int:
     except OSError as exc:
         print(f"warning: could not touch /tmp/ready: {exc}", file=sys.stderr)
 
-    print(f"consumer started as {consumer._consumer_name}", flush=True)
+    print(f"consumer started as {consumer.name}", flush=True)
     try:
         await consumer.run()
     finally:

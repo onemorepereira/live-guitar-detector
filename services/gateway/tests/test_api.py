@@ -68,6 +68,17 @@ async def test_create_session_returns_200_ok(client_with_fakeredis) -> None:
     assert await sm.exists(sid)
 
 
+async def test_create_session_over_active_cap_returns_429(client_with_fakeredis) -> None:
+    """A create beyond the active-session cap is rejected with 429."""
+    ac, fake, _sm, _wm = client_with_fakeredis
+    # Swap in a capped manager (the fixture installs an uncapped one).
+    app.state.session_manager = SessionManager(fake, max_active_sessions=1)
+    first = await ac.post("/api/session", json={"session_id": str(uuid.uuid4())})
+    assert first.status_code == 200
+    second = await ac.post("/api/session", json={"session_id": str(uuid.uuid4())})
+    assert second.status_code == 429
+
+
 async def test_create_session_duplicate_returns_409(client_with_fakeredis) -> None:
     """Second create with the same id is rejected with 409."""
     ac, _r, _sm, _wm = client_with_fakeredis
@@ -89,7 +100,7 @@ async def test_create_session_empty_body_returns_422(client_with_fakeredis) -> N
 async def test_create_session_empty_session_id_returns_422(
     client_with_fakeredis,
 ) -> None:
-    """Empty-string ``session_id`` violates the ``NonEmptyStr`` constraint."""
+    """Empty-string ``session_id`` violates the ``SessionId`` min-length constraint."""
     ac, *_ = client_with_fakeredis
     resp = await ac.post("/api/session", json={"session_id": ""})
     assert resp.status_code == 422
@@ -150,13 +161,30 @@ async def test_webrtc_offer_invalid_type_returns_422(
 
 
 async def test_webrtc_offer_empty_sdp_returns_422(client_with_fakeredis) -> None:
-    """Empty SDP violates the ``NonEmptyStr`` constraint on ``sdp``."""
+    """Empty SDP violates the ``Sdp`` min-length constraint."""
     ac, *_ = client_with_fakeredis
     sid = str(uuid.uuid4())
     await ac.post("/api/session", json={"session_id": sid})
     resp = await ac.post(
         "/api/webrtc/offer",
         json={"session_id": sid, "sdp": "", "type": "offer"},
+    )
+    assert resp.status_code == 422
+
+
+async def test_webrtc_offer_oversized_sdp_returns_422(client_with_fakeredis) -> None:
+    """An absurdly large SDP is rejected before it ever reaches aiortc.
+
+    Real SDPs are a few KB; the unauthenticated offer endpoint must bound
+    the body so a client can't feed an arbitrarily large blob to the parser.
+    """
+    ac, *_ = client_with_fakeredis
+    sid = str(uuid.uuid4())
+    await ac.post("/api/session", json={"session_id": sid})
+    huge_sdp = "v=0\n" + ("a=x\n" * 100_000)  # ~400 KB
+    resp = await ac.post(
+        "/api/webrtc/offer",
+        json={"session_id": sid, "sdp": huge_sdp, "type": "offer"},
     )
     assert resp.status_code == 422
 

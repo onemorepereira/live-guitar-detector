@@ -21,6 +21,7 @@ import numpy as np
 import openvino as ov
 
 from app.classifier import preprocess_for_clip
+from app.openvino_runtime import compile_config
 
 # Float floor to keep L2-normalization safe on degenerate (near-zero)
 # embeddings — the OpenVINO image tower never produces zero vectors in
@@ -45,6 +46,8 @@ class ProbeClassifier:
         model_dir: Path,
         probe_path: Path,
         input_size: int = 224,
+        device: str = "CPU",
+        num_threads: int = 0,
     ) -> None:
         model_dir = Path(model_dir)
         probe_path = Path(probe_path)
@@ -58,7 +61,9 @@ class ProbeClassifier:
         self._input_size = int(input_size)
 
         core = ov.Core()
-        self._image_model = core.compile_model(str(image_xml), device_name="CPU")
+        self._image_model = core.compile_model(
+            str(image_xml), device_name=device, config=compile_config(num_threads)
+        )
         self._image_output = self._image_model.output("image_features")
 
         # Load probe weights + labels. allow_pickle=False is deliberate:

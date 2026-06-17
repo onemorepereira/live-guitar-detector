@@ -125,6 +125,28 @@ async def test_teardown_unknown_session_still_fires_on_close(
     assert manager._closed_log == ["ghost"]  # type: ignore[attr-defined]
 
 
+async def test_close_all_closes_every_peer(manager: WebRTCManager) -> None:
+    """``close_all`` tears down every live peer and empties the registry.
+
+    Used by the app-shutdown path so peer connections (and their ingest
+    tasks) don't leak when the process stops.
+    """
+    closed: list[int] = []
+
+    class _FakePeer:
+        async def close(self) -> None:
+            closed.append(id(self))
+
+    p1, p2 = _FakePeer(), _FakePeer()
+    manager._peers["a"] = _PeerEntry(peer=p1)  # type: ignore[arg-type]
+    manager._peers["b"] = _PeerEntry(peer=p2)  # type: ignore[arg-type]
+
+    await manager.close_all()
+
+    assert manager._peers == {}
+    assert len(closed) == 2
+
+
 # ---------------------------------------------------------------------------
 # Integration tests — only run when RUN_AIORTC_TESTS=1.
 # ---------------------------------------------------------------------------

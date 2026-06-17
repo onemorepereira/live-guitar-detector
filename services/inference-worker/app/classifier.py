@@ -18,6 +18,7 @@ import cv2
 import numpy as np
 import openvino as ov
 
+from app.openvino_runtime import compile_config
 from app.prompts import Prompt
 
 # CLIP standard temperature: the trained model maps cosine similarities into
@@ -61,6 +62,8 @@ class Classifier:
         model_dir: Path,
         prompts: list[Prompt],
         input_size: int = 224,
+        device: str = "CPU",
+        num_threads: int = 0,
     ) -> None:
         if not prompts:
             # Empty prompt list would produce a (0, D) matrix; classify()
@@ -88,8 +91,9 @@ class Classifier:
         self._pretrained: str = meta.get("pretrained", "datacompdr")
 
         core = ov.Core()
-        self._image_model = core.compile_model(str(image_xml), device_name="CPU")
-        self._text_model = core.compile_model(str(text_xml), device_name="CPU")
+        config = compile_config(num_threads)
+        self._image_model = core.compile_model(str(image_xml), device_name=device, config=config)
+        self._text_model = core.compile_model(str(text_xml), device_name=device, config=config)
 
         # Bind the single named output of each tower so we read it back by name
         # rather than by dict-iteration order. If a future re-export adds extra

@@ -43,6 +43,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import time
 
 import cv2
 import numpy as np
@@ -124,8 +125,8 @@ def _decode_frame_message(fields: dict[bytes, bytes]) -> tuple[np.ndarray, int, 
     Wire fields are defined by the gateway (DESIGN.md §5.1): ``jpeg`` is the
     raw byte payload; ``frame_id`` and ``frame_ts`` are stringified integers.
     ``cv2.imdecode`` returns ``None`` on a malformed payload — we promote that
-    to ``ValueError`` so the caller's ``except Exception`` branch can leave
-    the entry in the PEL for inspection rather than silently dropping it.
+    to ``ValueError``. The caller treats any decode failure as a deterministic
+    poison frame and ack-drops it (it would never succeed on retry).
     """
     jpeg = fields[b"jpeg"]
     arr = np.frombuffer(jpeg, dtype=np.uint8)
@@ -156,11 +157,12 @@ async def consume_session(
     * Redis I/O errors (``ConnectionError`` etc.) → log + brief backoff + retry.
       The supervisor doesn't need to know; transient redis blips shouldn't
       flap consumer registration.
-    * Pipeline / decode errors → log and **skip the ack**. The entry stays in
-      the consumer group's PEL and will redeliver to another consumer after
-      the PEL timeout. This keeps a single bad frame from killing the loop
-      while preserving operator visibility (a stuck PEL means recurring
-      failure on the same entry).
+    * Decode errors (bad JPEG / missing field) → log and **ack-drop**. These
+      are deterministic per-frame failures; with one consumer per group nothing
+      reclaims the PEL, so leaving them pending would wedge the stream.
+    * Pipeline / model errors → log and **skip the ack**. These may be
+      transient, so the entry stays in the consumer group's PEL for operator
+      visibility (a stuck PEL means recurring failure on the same entry).
     """
     key = _frames_key(session_id)
     await _ensure_group(r, session_id)
@@ -168,10 +170,8 @@ async def consume_session(
     # Periodic stats: every STATS_INTERVAL_S, log a one-line summary so an
     # operator can answer "is the worker doing anything for this session?"
     # without grepping per-frame logs.
-    import time as _time
-
     stats_interval_s = 5.0
-    last_stats_at = _time.monotonic()
+    last_stats_at = time.monotonic()
     consumed = 0
     tracks_total = 0
 
@@ -207,6 +207,23 @@ async def consume_session(
             for entry_id, fields in entries:
                 try:
                     bgr, frame_id, frame_ts = _decode_frame_message(fields)
+                except Exception as exc:
+                    # Any failure decoding the frame bytes is a *deterministic*
+                    # per-frame problem (bad JPEG, missing/short field, an
+                    # occasional cv2.error) that will never succeed on retry.
+                    # With a single consumer per group nothing reclaims the PEL,
+                    # so leaving it pending would wedge the stream forever, and
+                    # letting it propagate would kill the whole session task.
+                    # Ack-drop it; the warning is the operator's signal.
+                    logger.warning(
+                        "session={} entry={} undecodable frame dropped: {}",
+                        session_id,
+                        entry_id,
+                        exc,
+                    )
+                    await r.xack(key, CONSUMER_GROUP, entry_id)
+                    continue
+                try:
                     event = pipeline.process_frame(
                         bgr, frame_id, session_id=session_id, frame_ts=frame_ts
                     )
@@ -215,9 +232,9 @@ async def consume_session(
                     consumed += 1
                     tracks_total += len(event.get("tracks", []))
                 except Exception as exc:
-                    # Intentionally do NOT ack. The PEL is the operator's
-                    # signal that something is wrong — silent drops would hide
-                    # it.
+                    # A pipeline/model error may be transient. Intentionally do
+                    # NOT ack — the PEL is the operator's signal that something
+                    # is wrong, and silent drops would hide it.
                     logger.warning(
                         "session={} entry={} pipeline failed: {} (not acked)",
                         session_id,
@@ -230,7 +247,7 @@ async def consume_session(
         # (raw YOLO detections + unconfirmed-track skips) so an operator
         # can localize "no tracks" to either "YOLO sees nothing" or
         # "ByteTrack is rejecting confirmations."
-        now_mono = _time.monotonic()
+        now_mono = time.monotonic()
         if now_mono - last_stats_at >= stats_interval_s:
             # Compact "Brand Model:count" breakdown sorted by frequency,
             # most-common first. Reads naturally when Unknown dominates.
@@ -290,6 +307,11 @@ class Consumer:
         self._tasks: dict[str, asyncio.Task] = {}
         self._stops: dict[str, asyncio.Event] = {}
         self._stop_supervisor = asyncio.Event()
+
+    @property
+    def name(self) -> str:
+        """This consumer's name within the ``inference`` group (e.g. the pod name)."""
+        return self._consumer_name
 
     async def run(self) -> None:
         """Supervisor loop: discover → reconcile → sleep, until :meth:`stop`.
