@@ -240,6 +240,32 @@ describe("useDetections", () => {
     expect(instances.length).toBe(1);
   });
 
+  it("does not reconnect when the gateway closes with 4404 (session not found)", () => {
+    vi.useFakeTimers();
+    renderHook(() => useDetections("abc"));
+    expect(instances.length).toBe(1);
+    act(() => instances[0].open());
+    // 4404 is the gateway's "session doesn't exist" code (ws_route). The
+    // session is gone server-side, so retrying just loops forever.
+    act(() => instances[0].dispatchEvent("close", { code: 4404 }));
+    act(() => {
+      vi.advanceTimersByTime(30000);
+    });
+    expect(instances.length).toBe(1);
+  });
+
+  it("DOES reconnect on an abnormal close with no code (1006/1005)", () => {
+    vi.useFakeTimers();
+    renderHook(() => useDetections("abc"));
+    act(() => instances[0].open());
+    // Network drop → no application close code → recoverable, must reconnect.
+    act(() => instances[0].dispatchEvent("close", {}));
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(instances.length).toBe(2);
+  });
+
   it("does not reconnect on a normal close (code 1000)", () => {
     vi.useFakeTimers();
     renderHook(() => useDetections("abc"));

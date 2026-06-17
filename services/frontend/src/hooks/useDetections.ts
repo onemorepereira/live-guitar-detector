@@ -28,8 +28,8 @@ const BACKOFF_CAP_MS = 5000;
  *  - Only the most recent event is exposed — we never queue stale frames
  *    since the UI redraws at canvas frame rate.
  *  - On close, reconnects with exponential backoff (1s, 2s, 4s, capped at
- *    5s) — except a clean (1000) or policy (1008, session gone) close, which
- *    is terminal, and a caller-initiated unmount / sessionId change.
+ *    5s) — except terminal closes (4404 session-not-found, 1000 normal, 1008
+ *    policy) and a caller-initiated unmount / sessionId change.
  *  - Every 5 seconds while open, sends `{"type":"ping"}`. If no pong arrives
  *    within 3 seconds, the socket is force-closed (it's half-open) so the
  *    close handler can reconnect.
@@ -119,12 +119,14 @@ export function useDetections(sessionId: string | null): UseDetectionsResult {
         if (pongTimeout) clearTimeout(pongTimeout);
         pingInterval = null;
         pongTimeout = null;
-        // A clean (1000) or policy (1008 — session gone) close is terminal:
-        // the gateway doesn't want us back, so reconnecting would just hammer
-        // a dead session. Any other code (or an abnormal drop with no code)
-        // is treated as recoverable and triggers backoff reconnect.
+        // Terminal closes — the session is gone server-side, so reconnecting
+        // would just hammer a dead session forever:
+        //   4404 = gateway's "session not found" (ws_route, the real signal)
+        //   1000 = normal closure, 1008 = policy violation
+        // Any other code (or an abnormal drop with no code: 1006/1005) is
+        // recoverable and triggers backoff reconnect.
         const code = (ev as CloseEvent).code;
-        if (code === 1000 || code === 1008) return;
+        if (code === 4404 || code === 1000 || code === 1008) return;
         // Reconnect with exponential backoff.
         const delay = Math.min(BACKOFF_BASE_MS * 2 ** attempt, BACKOFF_CAP_MS);
         attempt += 1;
