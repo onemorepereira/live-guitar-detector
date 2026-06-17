@@ -161,6 +161,23 @@ async def test_webrtc_offer_empty_sdp_returns_422(client_with_fakeredis) -> None
     assert resp.status_code == 422
 
 
+async def test_webrtc_offer_oversized_sdp_returns_422(client_with_fakeredis) -> None:
+    """An absurdly large SDP is rejected before it ever reaches aiortc.
+
+    Real SDPs are a few KB; the unauthenticated offer endpoint must bound
+    the body so a client can't feed an arbitrarily large blob to the parser.
+    """
+    ac, *_ = client_with_fakeredis
+    sid = str(uuid.uuid4())
+    await ac.post("/api/session", json={"session_id": sid})
+    huge_sdp = "v=0\n" + ("a=x\n" * 100_000)  # ~400 KB
+    resp = await ac.post(
+        "/api/webrtc/offer",
+        json={"session_id": sid, "sdp": huge_sdp, "type": "offer"},
+    )
+    assert resp.status_code == 422
+
+
 # --------------------------------------------------------------------------
 # Idle-sweep helper tests
 #

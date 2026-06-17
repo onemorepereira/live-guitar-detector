@@ -87,6 +87,34 @@ async def test_touch_updates_last_frame_ts(manager: SessionManager) -> None:
     assert data["last_frame_ts"] == 999_999_999
 
 
+async def test_touch_does_not_resurrect_concurrently_deleted_session(
+    manager: SessionManager,
+) -> None:
+    """A delete landing between touch()'s GET and SET must not recreate the key.
+
+    Otherwise we leak a ``session:`` key that is no longer in ``sessions:active``
+    — a zombie the idle sweep can never reap.
+    """
+    sid = "racy"
+    await manager.create(sid)
+
+    real_get = manager._r.get
+
+    async def get_then_delete(key: str):
+        # Read the live value, then simulate a concurrent teardown landing
+        # before touch() issues its SET.
+        raw = await real_get(key)
+        await manager.delete(sid)
+        return raw
+
+    with patch.object(manager._r, "get", side_effect=get_then_delete):
+        await manager.touch(sid)
+
+    assert not await manager.exists(sid)
+    members = await manager._r.smembers(SessionManager.ACTIVE_SET)
+    assert all(m.decode() != sid for m in members)
+
+
 async def test_idle_sessions_returns_old_ones(manager: SessionManager) -> None:
     # Create a session whose last_frame_ts sits far in the past.
     with patch.object(SessionManager, "_now_ms", return_value=0):

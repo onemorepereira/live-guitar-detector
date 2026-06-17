@@ -109,6 +109,9 @@ async def lifespan(app: FastAPI):
         sweep_task.cancel()
         with suppress(asyncio.CancelledError):
             await sweep_task
+        # Close outstanding peer connections (and their ingest tasks) before
+        # dropping Redis, so aiortc transports shut down cleanly.
+        await app.state.webrtc_manager.close_all()
         await app.state.redis.aclose()
         logger.info("gateway shutting down")
 
@@ -198,14 +201,14 @@ async def healthz() -> dict:
 
 
 @app.get("/readyz")
-async def readyz(response: Response) -> dict:
+async def readyz(request: Request, response: Response) -> dict:
     """Readiness probe — gateway can reach its Redis dependency.
 
     Returns 503 if `redis.ping()` raises so an orchestrator can hold
     traffic off until the dependency recovers.
     """
     try:
-        await app.state.redis.ping()
+        await request.app.state.redis.ping()
         return {"ok": True}
     except Exception as e:
         response.status_code = 503

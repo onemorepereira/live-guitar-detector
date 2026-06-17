@@ -102,7 +102,11 @@ class SessionManager:
             return
         data = json.loads(raw)
         data["last_frame_ts"] = self._now_ms()
-        await self._r.set(key, json.dumps(data), ex=self.SESSION_TTL_S)
+        # ``xx=True``: only refresh if the key still exists. Without it, a
+        # delete landing between the GET above and this SET would recreate the
+        # ``session:`` key with a fresh TTL — orphaned from ``sessions:active``
+        # and unreapable by the idle sweep.
+        await self._r.set(key, json.dumps(data), xx=True, ex=self.SESSION_TTL_S)
 
     async def idle_sessions(self, timeout_s: int) -> list[str]:
         """Return IDs whose ``last_frame_ts`` is at least ``timeout_s`` old.
