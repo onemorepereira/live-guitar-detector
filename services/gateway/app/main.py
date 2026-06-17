@@ -28,7 +28,7 @@ from app.models import (
     WebRTCAnswerResponse,
     WebRTCOfferRequest,
 )
-from app.session import SessionAlreadyExists, SessionManager
+from app.session import SessionAlreadyExists, SessionLimitReached, SessionManager
 from app.webrtc import WebRTCManager
 from app.websocket import forward_detections
 
@@ -69,7 +69,9 @@ async def lifespan(app: FastAPI):
     settings = Settings()
     app.state.settings = settings
     app.state.redis = redis_async.from_url(settings.REDIS_URL, decode_responses=False)
-    app.state.session_manager = SessionManager(app.state.redis)
+    app.state.session_manager = SessionManager(
+        app.state.redis, max_active_sessions=settings.MAX_ACTIVE_SESSIONS
+    )
     app.state.webrtc_manager = WebRTCManager(
         r=app.state.redis,
         settings=settings,
@@ -149,6 +151,11 @@ async def create_session(body: SessionCreateRequest, request: Request) -> Sessio
         raise HTTPException(
             status_code=409,
             detail=f"session {body.session_id} already exists",
+        ) from exc
+    except SessionLimitReached as exc:
+        raise HTTPException(
+            status_code=429,
+            detail="active session limit reached; stop the current session first",
         ) from exc
     return SessionCreateResponse(ok=True)
 

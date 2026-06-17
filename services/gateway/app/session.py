@@ -32,6 +32,16 @@ class SessionAlreadyExists(Exception):
     """Raised when :meth:`SessionManager.create` is called for an existing id."""
 
 
+class SessionLimitReached(Exception):
+    """Raised when :meth:`SessionManager.create` would exceed the active cap.
+
+    The inference worker shares one ByteTrack tracker (and vote registry)
+    across all sessions, so two concurrent sessions interleave frames into the
+    same tracker and corrupt each other's track ids. Until that's isolated
+    per-session, the gateway caps the number of simultaneously-active sessions.
+    """
+
+
 @dataclass(frozen=True)
 class SessionState:
     """Immutable snapshot returned by :meth:`SessionManager.create`."""
@@ -48,8 +58,11 @@ class SessionManager:
     ACTIVE_SET = "sessions:active"
     SESSION_TTL_S = 60  # sliding TTL refreshed by touch()
 
-    def __init__(self, r: redis_async.Redis) -> None:
+    def __init__(self, r: redis_async.Redis, max_active_sessions: int | None = None) -> None:
         self._r = r
+        # ``None`` = unlimited. When set, :meth:`create` rejects a new session
+        # once ``sessions:active`` is already at the cap.
+        self._max_active_sessions = max_active_sessions
 
     @classmethod
     def _now_ms(cls) -> int:
@@ -67,6 +80,16 @@ class SessionManager:
         whole metadata write is atomic in one round-trip. Streams are not
         pre-created — the first ``XADD`` (Task 2.3) will create them.
         """
+        if self._max_active_sessions is not None:
+            # Best-effort cap check. The SCARD→SET window is racy under truly
+            # concurrent creates, but the realistic deployment is single-user;
+            # a rare over-admit is harmless next to the cost of a Lua/WATCH
+            # transaction. SET NX below still guarantees per-id atomicity.
+            active = await self._r.scard(self.ACTIVE_SET)
+            if active >= self._max_active_sessions:
+                raise SessionLimitReached(
+                    f"active session limit reached ({self._max_active_sessions})"
+                )
         now = self._now_ms()
         payload = json.dumps({"created_ts": now, "last_frame_ts": now})
         ok = await self._r.set(

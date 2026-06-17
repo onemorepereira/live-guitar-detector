@@ -68,6 +68,17 @@ async def test_create_session_returns_200_ok(client_with_fakeredis) -> None:
     assert await sm.exists(sid)
 
 
+async def test_create_session_over_active_cap_returns_429(client_with_fakeredis) -> None:
+    """A create beyond the active-session cap is rejected with 429."""
+    ac, fake, _sm, _wm = client_with_fakeredis
+    # Swap in a capped manager (the fixture installs an uncapped one).
+    app.state.session_manager = SessionManager(fake, max_active_sessions=1)
+    first = await ac.post("/api/session", json={"session_id": str(uuid.uuid4())})
+    assert first.status_code == 200
+    second = await ac.post("/api/session", json={"session_id": str(uuid.uuid4())})
+    assert second.status_code == 429
+
+
 async def test_create_session_duplicate_returns_409(client_with_fakeredis) -> None:
     """Second create with the same id is rejected with 409."""
     ac, _r, _sm, _wm = client_with_fakeredis
