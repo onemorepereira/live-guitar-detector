@@ -125,8 +125,8 @@ def _decode_frame_message(fields: dict[bytes, bytes]) -> tuple[np.ndarray, int, 
     Wire fields are defined by the gateway (DESIGN.md §5.1): ``jpeg`` is the
     raw byte payload; ``frame_id`` and ``frame_ts`` are stringified integers.
     ``cv2.imdecode`` returns ``None`` on a malformed payload — we promote that
-    to ``ValueError`` so the caller's ``except Exception`` branch can leave
-    the entry in the PEL for inspection rather than silently dropping it.
+    to ``ValueError``. The caller treats any decode failure as a deterministic
+    poison frame and ack-drops it (it would never succeed on retry).
     """
     jpeg = fields[b"jpeg"]
     arr = np.frombuffer(jpeg, dtype=np.uint8)
@@ -157,11 +157,12 @@ async def consume_session(
     * Redis I/O errors (``ConnectionError`` etc.) → log + brief backoff + retry.
       The supervisor doesn't need to know; transient redis blips shouldn't
       flap consumer registration.
-    * Pipeline / decode errors → log and **skip the ack**. The entry stays in
-      the consumer group's PEL and will redeliver to another consumer after
-      the PEL timeout. This keeps a single bad frame from killing the loop
-      while preserving operator visibility (a stuck PEL means recurring
-      failure on the same entry).
+    * Decode errors (bad JPEG / missing field) → log and **ack-drop**. These
+      are deterministic per-frame failures; with one consumer per group nothing
+      reclaims the PEL, so leaving them pending would wedge the stream.
+    * Pipeline / model errors → log and **skip the ack**. These may be
+      transient, so the entry stays in the consumer group's PEL for operator
+      visibility (a stuck PEL means recurring failure on the same entry).
     """
     key = _frames_key(session_id)
     await _ensure_group(r, session_id)
@@ -206,12 +207,14 @@ async def consume_session(
             for entry_id, fields in entries:
                 try:
                     bgr, frame_id, frame_ts = _decode_frame_message(fields)
-                except (ValueError, KeyError) as exc:
-                    # Malformed/incomplete frame — a *deterministic* failure
-                    # that will never succeed on retry. With a single consumer
-                    # per group nothing reclaims the PEL, so leaving it pending
-                    # would wedge the stream forever. Ack-drop it instead; the
-                    # warning is the operator's signal.
+                except Exception as exc:
+                    # Any failure decoding the frame bytes is a *deterministic*
+                    # per-frame problem (bad JPEG, missing/short field, an
+                    # occasional cv2.error) that will never succeed on retry.
+                    # With a single consumer per group nothing reclaims the PEL,
+                    # so leaving it pending would wedge the stream forever, and
+                    # letting it propagate would kill the whole session task.
+                    # Ack-drop it; the warning is the operator's signal.
                     logger.warning(
                         "session={} entry={} undecodable frame dropped: {}",
                         session_id,

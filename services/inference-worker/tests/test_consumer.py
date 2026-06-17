@@ -233,6 +233,45 @@ async def test_consume_session_acks_and_drops_undecodable_frame(r):
     assert pending["pending"] == 0
 
 
+async def test_consume_session_drops_frame_on_unexpected_decode_error(r, monkeypatch):
+    """A non-ValueError decode failure (e.g. cv2.error) must not kill the loop.
+
+    ``cv2.imdecode`` usually returns None (→ ValueError) but can raise other
+    types on some malformed inputs. Those are still deterministic frame
+    failures, so they must be ack-dropped, not propagated out of the per-session
+    task (which would stop the whole session).
+    """
+    sid = "boom"
+    await r.xadd(
+        f"frames:{sid}",
+        _frame_fields(_make_jpeg(), sid=sid, fid=1, fts=1, w=64, h=64),
+    )
+
+    def _raise(_fields):
+        raise RuntimeError("simulated cv2.error")
+
+    monkeypatch.setattr("app.consumer._decode_frame_message", _raise)
+
+    pipeline = MagicMock()
+    pipeline.process_frame = MagicMock()
+
+    stop = asyncio.Event()
+
+    async def stop_soon():
+        await asyncio.sleep(0.3)
+        stop.set()
+
+    # If the unexpected error escaped, this gather would raise and fail the test.
+    await asyncio.gather(
+        consume_session(r, sid, pipeline, consumer_name="t1", stop_event=stop),
+        stop_soon(),
+    )
+
+    pipeline.process_frame.assert_not_called()
+    pending = await r.xpending(f"frames:{sid}", CONSUMER_GROUP)
+    assert pending["pending"] == 0
+
+
 async def test_consumer_reconciles_sessions_from_active_set(r):
     """Supervisor adds tasks when ``sessions:active`` grows; removes them when it shrinks.
 
