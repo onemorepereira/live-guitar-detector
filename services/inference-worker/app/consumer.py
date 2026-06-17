@@ -43,6 +43,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import time
 
 import cv2
 import numpy as np
@@ -168,10 +169,8 @@ async def consume_session(
     # Periodic stats: every STATS_INTERVAL_S, log a one-line summary so an
     # operator can answer "is the worker doing anything for this session?"
     # without grepping per-frame logs.
-    import time as _time
-
     stats_interval_s = 5.0
-    last_stats_at = _time.monotonic()
+    last_stats_at = time.monotonic()
     consumed = 0
     tracks_total = 0
 
@@ -207,6 +206,21 @@ async def consume_session(
             for entry_id, fields in entries:
                 try:
                     bgr, frame_id, frame_ts = _decode_frame_message(fields)
+                except (ValueError, KeyError) as exc:
+                    # Malformed/incomplete frame — a *deterministic* failure
+                    # that will never succeed on retry. With a single consumer
+                    # per group nothing reclaims the PEL, so leaving it pending
+                    # would wedge the stream forever. Ack-drop it instead; the
+                    # warning is the operator's signal.
+                    logger.warning(
+                        "session={} entry={} undecodable frame dropped: {}",
+                        session_id,
+                        entry_id,
+                        exc,
+                    )
+                    await r.xack(key, CONSUMER_GROUP, entry_id)
+                    continue
+                try:
                     event = pipeline.process_frame(
                         bgr, frame_id, session_id=session_id, frame_ts=frame_ts
                     )
@@ -215,9 +229,9 @@ async def consume_session(
                     consumed += 1
                     tracks_total += len(event.get("tracks", []))
                 except Exception as exc:
-                    # Intentionally do NOT ack. The PEL is the operator's
-                    # signal that something is wrong — silent drops would hide
-                    # it.
+                    # A pipeline/model error may be transient. Intentionally do
+                    # NOT ack — the PEL is the operator's signal that something
+                    # is wrong, and silent drops would hide it.
                     logger.warning(
                         "session={} entry={} pipeline failed: {} (not acked)",
                         session_id,
@@ -230,7 +244,7 @@ async def consume_session(
         # (raw YOLO detections + unconfirmed-track skips) so an operator
         # can localize "no tracks" to either "YOLO sees nothing" or
         # "ByteTrack is rejecting confirmations."
-        now_mono = _time.monotonic()
+        now_mono = time.monotonic()
         if now_mono - last_stats_at >= stats_interval_s:
             # Compact "Brand Model:count" breakdown sorted by frequency,
             # most-common first. Reads naturally when Unknown dominates.
@@ -290,6 +304,11 @@ class Consumer:
         self._tasks: dict[str, asyncio.Task] = {}
         self._stops: dict[str, asyncio.Event] = {}
         self._stop_supervisor = asyncio.Event()
+
+    @property
+    def name(self) -> str:
+        """This consumer's name within the ``inference`` group (e.g. the pod name)."""
+        return self._consumer_name
 
     async def run(self) -> None:
         """Supervisor loop: discover → reconcile → sleep, until :meth:`stop`.

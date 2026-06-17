@@ -217,7 +217,7 @@ async def _run_consumer(settings: Settings) -> int:
     except OSError as exc:
         print(f"warning: could not touch /tmp/ready: {exc}", file=sys.stderr)
 
-    print(f"consumer started as {consumer._consumer_name}", flush=True)
+    print(f"consumer started as {consumer.name}", flush=True)
     try:
         await consumer.run()
     finally:

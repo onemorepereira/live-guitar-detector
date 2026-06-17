@@ -196,6 +196,43 @@ async def test_consume_session_does_not_ack_on_pipeline_failure(r):
     assert pending["pending"] == 1
 
 
+async def test_consume_session_acks_and_drops_undecodable_frame(r):
+    """An undecodable frame is a poison entry: ack-drop it, don't wedge the PEL.
+
+    With a single consumer per group nothing ever reclaims the PEL, so a
+    malformed JPEG (a deterministic decode failure) must be acked and dropped
+    rather than left pending forever. Genuine pipeline/model errors keep the
+    old not-acked behaviour (see the test above) — only decode/validation
+    failures are dropped.
+    """
+    sid = "poison"
+    await r.xadd(
+        f"frames:{sid}",
+        _frame_fields(b"not-a-jpeg", sid=sid, fid=1, fts=1, w=64, h=64),
+    )
+
+    pipeline = MagicMock()
+    pipeline.process_frame = MagicMock()
+
+    stop = asyncio.Event()
+
+    async def stop_soon():
+        await asyncio.sleep(0.3)
+        stop.set()
+
+    await asyncio.gather(
+        consume_session(r, sid, pipeline, consumer_name="t1", stop_event=stop),
+        stop_soon(),
+    )
+
+    # Nothing published, pipeline never invoked, and the poison entry is gone
+    # from the PEL (acked-dropped) instead of wedged.
+    assert await r.xlen(f"detections:{sid}") == 0
+    pipeline.process_frame.assert_not_called()
+    pending = await r.xpending(f"frames:{sid}", CONSUMER_GROUP)
+    assert pending["pending"] == 0
+
+
 async def test_consumer_reconciles_sessions_from_active_set(r):
     """Supervisor adds tasks when ``sessions:active`` grows; removes them when it shrinks.
 
